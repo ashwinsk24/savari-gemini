@@ -12,7 +12,7 @@
 */
 
 // ─── CONSTANTS ───
-const AI_ROAST_URL = 'https://savari-gemini.savari-gemini.workers.dev'; // Deploy worker.js to Cloudflare Workers and set URL here
+const GEMINI_API_KEY = 'REPLACE_ME_IN_CI'; // Replaced by GitHub Actions at deploy
 
 const ROAD = {
   totalWidth: 16,
@@ -1016,7 +1016,7 @@ function gameOver(hitType = 'traffic') {
   if (aiRoastEl) {
     aiRoastEl.textContent = 'Auto Chettan is typing...';
 
-    fetch(AI_ROAST_URL, {
+    fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + GEMINI_API_KEY, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
