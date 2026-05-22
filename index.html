@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Savari Gemini — Kerala Auto-Rickshaw Arcade</title>
+  <meta name="description" content="Race a Kerala auto-rickshaw through Ernakulam's infamous junctions, dodge KSRTC buses, pick up customers, and fly over traffic gridlocks in this chaotic arcade game.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ══ Start Screen ══ -->
+  <div id="start-screen">
+    <div class="start-title">Savari Gemini</div>
+    <div class="start-subtitle">Ernakulam Airborne</div>
+    <div class="start-tagline">"Oru auto vilikku… if you dare."</div>
+    <div class="start-instructions">
+      <div class="key-row"><span class="key-box">←</span><span class="key-box">→</span> Steer</div>
+      <div class="key-row"><span class="key-box">SPACE</span> Pazham Pori Boost — Fly!</div>
+      <div class="key-row" style="color:rgba(255,255,255,0.3);font-size:11px;">Collect coins to fill boost &bull; Pick up customers for 2× score</div>
+      <div class="key-row" style="color:rgba(255,255,255,0.2);font-size:11px;">Cross the median at your own risk — oncoming traffic!</div>
+    </div>
+    <div class="start-play">Click or Press ENTER to Start</div>
+  </div>
+
+  <!-- ══ HUD ══ -->
+  <div id="hud">
+    <div id="hud-left">
+      <span class="hud-label">Score</span>
+      <span class="hud-value" id="score-value">0</span>
+      <span id="multiplier-badge">× 2</span>
+    </div>
+    <div id="hud-right" style="text-align:right;">
+      <span class="hud-label">Zone</span>
+      <span id="zone-name">Edappally Junction</span>
+      <canvas id="minimap" width="150" height="150"></canvas>
+    </div>
+  </div>
+
+  <!-- ══ Customer Status ══ -->
+  <div id="savari-status">
+    <span class="savari-icon">🧑</span>
+    <span class="savari-text">Savari Aboard</span>
+    <span class="savari-mult">2×</span>
+  </div>
+
+  <!-- ══ Gridlock Warning ══ -->
+  <div id="gridlock-warning">⚠ Gridlock Ahead — Use Boost! ⚠</div>
+
+  <!-- ══ Oncoming Traffic Warning ══ -->
+  <div id="oncoming-warning">⚠ Wrong Side — Oncoming Traffic!</div>
+
+  <!-- ══ Boost Bar ══ -->
+  <div id="boost-container">
+    <div id="boost-label">🍌 Pazham Pori Boost <span id="mic-icon">🎤</span></div>
+    <div id="boost-bar-outer">
+      <div id="boost-bar-inner"></div>
+    </div>
+    <div id="boost-ready">⚡ Ready — Press Space ⚡</div>
+  </div>
+
+  <!-- ══ Flying Indicator ══ -->
+  <div id="flying-indicator">✈ Airborne ✈</div>
+
+  <!-- ══ Zone Transition ══ -->
+  <div id="zone-transition">
+    <div class="zone-title" id="zone-trans-title"></div>
+    <div class="zone-subtitle" id="zone-trans-subtitle"></div>
+  </div>
+
+  <!-- ══ Vignette & Speed Lines ══ -->
+  <div id="vignette"></div>
+  <div id="speed-lines"></div>
+
+  <!-- ══ Game Over ══ -->
+  <div id="game-over">
+    <div class="gameover-title">Traffic Block!</div>
+    <div class="gameover-subtitle">Stuck at</div>
+    <div class="gameover-location" id="gameover-zone">Vyttila Junction</div>
+    <div class="gameover-score-label">Final Score</div>
+    <div class="gameover-score" id="gameover-score">0</div>
+    <div class="gameover-highscore" id="gameover-highscore"></div>
+    <div id="ai-roast"></div>
+    <div class="gameover-restart">Click or Press ENTER to Retry</div>
+  </div>
+
+  <!-- ══ Mobile Controls ══ -->
+  <div id="mobile-controls">
+    <div class="mobile-btn" id="mobile-left">◀</div>
+    <div class="mobile-btn" id="mobile-boost">BOOST</div>
+    <div class="mobile-btn" id="mobile-right">▶</div>
+  </div>
+
+  <!-- ══ Engine ══ -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
