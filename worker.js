@@ -11,7 +11,7 @@ const CORS_HEADERS = {
 };
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: CORS_HEADERS });
     }
@@ -21,7 +21,7 @@ export default {
     }
 
     const body = await request.json();
-    const url = GEMINI_URL + '?key=' + GEMINI_API_KEY;
+    const url = GEMINI_URL + '?key=' + env.GEMINI_API_KEY;
 
     const resp = await fetch(url, {
       method: 'POST',
