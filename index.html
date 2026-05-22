@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Savari Gemini — Kerala Auto-Rickshaw Arcade</title>
-  <meta name="description" content="Race a Kerala auto-rickshaw through Ernakulam's infamous junctions, dodge KSRTC buses, pick up customers, and fly over traffic gridlocks in this chaotic arcade game.">
+  <meta name="description" content="Drive a Kerala auto-rickshaw from Thrissur to Ernakulam. Stop at real red lights, dodge traffic, and learn the Motor Vehicles Act the hard way.">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -12,10 +12,11 @@
   <!-- ══ Start Screen ══ -->
   <div id="start-screen">
     <div class="start-title">Savari Gemini</div>
-    <div class="start-subtitle">Ernakulam Airborne</div>
+    <div class="start-subtitle">Thrissur → Ernakulam via NH 544</div>
     <div class="start-tagline">"Oru auto vilikku… if you dare."</div>
     <div class="start-instructions">
       <div class="key-row"><span class="key-box">←</span><span class="key-box">→</span> Steer</div>
+      <div class="key-row"><span class="key-box">↑</span> Accelerate · <span class="key-box">↓</span> Brake</div>
       <div class="key-row"><span class="key-box">SPACE</span> Pazham Pori Boost — Fly!</div>
       <div class="key-row" style="color:rgba(255,255,255,0.3);font-size:11px;">Collect coins to fill boost &bull; Pick up customers for 2× score</div>
       <div class="key-row" style="color:rgba(255,255,255,0.2);font-size:11px;">Cross the median at your own risk — oncoming traffic!</div>
@@ -29,11 +30,21 @@
       <span class="hud-label">Score</span>
       <span class="hud-value" id="score-value">0</span>
       <span id="multiplier-badge">× 2</span>
+      <div id="gear-display" style="margin-top:6px;font-family:'Teko',sans-serif;font-size:22px;color:#ffcc44;line-height:1;">
+        <span class="hud-label">Gear</span>
+        <span id="gear-value">1</span>
+      </div>
     </div>
     <div id="hud-right" style="text-align:right;">
       <span class="hud-label">Zone</span>
       <span id="zone-name">Edappally Junction</span>
       <canvas id="minimap" width="150" height="150"></canvas>
+      <div id="speedometer" style="text-align: right; margin-top: 10px;">
+        <span class="hud-label">Speed</span>
+        <div style="font-family: 'Teko', sans-serif; font-size: 32px; color: #66ffaa; line-height: 1;">
+          <span id="speed-value">0</span> <span style="font-size: 16px;">KM/H</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -84,6 +95,19 @@
     <div class="gameover-restart">Click or Press ENTER to Retry</div>
   </div>
 
+  <!-- ══ Junction Timer ══ -->
+  <div id="junction-timer" style="display:none;position:fixed;bottom:120px;left:50%;transform:translateX(-50%);text-align:center;pointer-events:none;z-index:20;">
+    <div id="junction-timer-name" style="font-family:'Teko',sans-serif;font-size:22px;color:#ff4444;text-shadow:0 0 15px rgba(255,0,0,0.9);"></div>
+    <div id="junction-timer-bar" style="width:260px;height:10px;background:rgba(255,255,255,0.15);border-radius:5px;margin:6px auto 0;overflow:hidden;border:1px solid rgba(255,68,68,0.4);">
+      <div id="junction-timer-fill" style="width:100%;height:100%;background:#ff2222;border-radius:5px;transition:width 0.05s;"></div>
+    </div>
+  </div>
+
+  <!-- ══ Stop Instruction ══ -->
+  <div id="stop-instruction" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-family:'Teko',sans-serif;font-size:72px;color:#ff0000;text-shadow:0 0 40px rgba(255,0,0,0.8),0 0 80px rgba(255,0,0,0.4);pointer-events:none;z-index:25;animation:pulse 0.8s infinite;text-align:center;line-height:1;">
+    🛑<br><span style="font-size:36px;">PRESS ↓ TO STOP</span>
+  </div>
+
   <!-- ══ Mobile Controls ══ -->
   <div id="mobile-controls">
     <div class="mobile-btn" id="mobile-left">◀</div>
@@ -93,6 +117,6 @@
 
   <!-- ══ Engine ══ -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="game.js"></script>
+  <script src="game.js?v=6"></script>
 </body>
 </html>

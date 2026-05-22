@@ -26,11 +26,14 @@ const ROAD = {
 };
 
 const ZONES = [
-  { name: 'Edappally Junction', subtitle: 'Dodge the Lulu Mall traffic!', fogColor: 0x0a1118, skyTop: 0x0a1118, skyBot: 0x1a2a22, groundColor: 0x0d1a0f },
-  { name: 'Vyttila Junction', subtitle: 'Navigate the flyover pillars!', fogColor: 0x0f0a1a, skyTop: 0x0f0a1a, skyBot: 0x1a1428, groundColor: 0x0c0f0a },
-  { name: 'Fort Kochi Seaside', subtitle: 'Backwaters & colonial charm!', fogColor: 0x081a1e, skyTop: 0x081a1e, skyBot: 0x0f2a2a, groundColor: 0x0a1812 },
-  { name: 'NH 544 Muringoor', subtitle: 'Beware the craters!', fogColor: 0x0c1610, skyTop: 0x0c1610, skyBot: 0x1a2818, groundColor: 0x0e1a0c },
+  { name: 'Thrissur City', subtitle: 'Departing Thrissur', fogColor: 0x0a1118, skyTop: 0x0a1118, skyBot: 0x1a2a22, groundColor: 0x0d1a0f },
+  { name: 'Paliyekkara Toll', subtitle: 'Toll plaza — slow down!', fogColor: 0x0f0a1a, skyTop: 0x0f0a1a, skyBot: 0x1a1428, groundColor: 0x0c0f0a },
+  { name: 'NH 544 Highway', subtitle: 'Open road ahead', fogColor: 0x0c1610, skyTop: 0x0c1610, skyBot: 0x1a2818, groundColor: 0x0e1a0c },
+  { name: 'Labour Junction', subtitle: 'Traffic merging', fogColor: 0x0a1118, skyTop: 0x0a1118, skyBot: 0x1a2a22, groundColor: 0x0d1a0f },
+  { name: 'HMT Junction', subtitle: 'Industrial area', fogColor: 0x0f0a1a, skyTop: 0x0f0a1a, skyBot: 0x1a1428, groundColor: 0x0c0f0a },
+  { name: 'Ernakulam Corridor', subtitle: 'City junctions ahead', fogColor: 0x081a1e, skyTop: 0x081a1e, skyBot: 0x0f2a2a, groundColor: 0x0a1812 },
 ];
+const ZONE_BOUNDARIES = [3000, 8000, 16000, 22000, 26000];
 
 // ─── GAME STATE ───
 const S = {
@@ -38,9 +41,21 @@ const S = {
   over: false,
   score: 0,
   highScore: parseInt(localStorage.getItem('savariHS') || '0'),
-  speed: 0.32,
-  maxSpeed: 0.95,
-  speedInc: 0.00007,
+  velocity: 0,
+  maxVelocity: 0.75,
+  braking: 0.04,
+  friction: 0.006,
+  speed: 0,
+
+  // gear system
+  gear: 1,
+  maxGear: 4,
+  gearAccel: [0, 0.008, 0.005, 0.003, 0.002],
+  gearFloor: [0, 0, 0.25, 0.50, 0.75],
+  gearCeil: [0, 0.30, 0.55, 0.78, 1.0],
+  gearChangeCooldown: 0,
+  junctionApproachDist: null,
+
   playerX: -3.5,
   playerTargetX: -3.5,
   steerSpeed: 0.11,
@@ -71,12 +86,12 @@ const S = {
   oncomingTimer: 0,
   coinTimer: 0,
   potholeTimer: 0,
+  signTimer: 0,
   savariPickupTimer: 0,
 
   // tracking
   distanceTraveled: 0,
   currentZone: 0,
-  zoneTimer: 0,
 
   // object pools
   obstacles: [],
@@ -84,6 +99,7 @@ const S = {
   coins: [],
   metroPillars: [],
   roadMarkings: [],
+  roadSigns: [],
   buildings: [],
   palms: [],
   potholes: [],
@@ -91,6 +107,11 @@ const S = {
   pickupZones: [],
   dropoffZones: [],
   gridlockWalls: [],
+
+  // map data
+  waypoints: [],
+  nextWaypointIndex: 0,
+  activeTrafficLight: null,
 };
 
 // ─── DOM REFS ───
@@ -260,6 +281,16 @@ makeCurb(ROAD.halfWidth + 1);
 // ── Metro Pillars & Viaduct ──
 function buildMetroPillars() {
   for (let z = 10; z > -240; z -= 14) {
+    // Median pillars (Ernakulam-style metro on the divider)
+    const mGeo = new THREE.BoxGeometry(0.5, 10, 0.5);
+    const mMat = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.7 });
+    const mp = new THREE.Mesh(mGeo, mMat);
+    mp.position.set(ROAD.medianX, 5, z);
+    mp.castShadow = true;
+    scene.add(mp);
+    S.metroPillars.push(mp);
+
+    // Left & right pillars
     [-(ROAD.halfWidth + 0.3), ROAD.halfWidth + 0.3].forEach((x, idx) => {
       const pGeo = new THREE.BoxGeometry(0.7, 11, 0.7);
       const pMat = new THREE.MeshStandardMaterial({ color: 0x777777, roughness: 0.75 });
@@ -283,7 +314,69 @@ function buildMetroPillars() {
 }
 buildMetroPillars();
 
-// ── Coconut Palm Trees ──
+// ── Traffic Signals (Kerala-style) ──
+function createTrafficSignal(x, z) {
+  const g = new THREE.Group();
+  // Pole
+  const poleGeo = new THREE.CylinderGeometry(0.06, 0.08, 3.2, 6);
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.7 });
+  const pole = new THREE.Mesh(poleGeo, poleMat);
+  pole.position.y = 1.6;
+  g.add(pole);
+
+  // Signal box
+  const boxGeo = new THREE.BoxGeometry(0.3, 0.6, 0.25);
+  const boxMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6 });
+  const box = new THREE.Mesh(boxGeo, boxMat);
+  box.position.set(0, 3.0, 0);
+  g.add(box);
+
+  // Lights (red, yellow, green) — only one active
+  const lightStates = ['red', 'yellow', 'green'];
+  const active = lightStates[Math.floor(Math.random() * 3)];
+  const lightColors = { red: 0xff2200, yellow: 0xffcc00, green: 0x22dd44 };
+  [2.85, 3.0, 3.15].forEach((y, i) => {
+    const lGeo = new THREE.SphereGeometry(0.06, 6, 6);
+    const color = lightStates[i] === active ? lightColors[lightStates[i]] : 0x111111;
+    const lMat = new THREE.MeshBasicMaterial({ color });
+    const l = new THREE.Mesh(lGeo, lMat);
+    l.position.set(0, y, 0.14);
+    g.add(l);
+  });
+
+  // Small glow for active light
+  if (active === 'green') {
+    const glow = new THREE.PointLight(0x22dd44, 0.08, 3);
+    glow.position.set(0, 3.0, 0.3);
+    g.add(glow);
+  }
+
+  g.position.set(x, 0, z);
+  return g;
+}
+
+for (let z = 5; z > -240; z -= 40 + Math.random() * 30) {
+  [-1, 1].forEach(side => {
+    const sig = createTrafficSignal(side * (ROAD.halfWidth + 2.5), z);
+    scene.add(sig);
+    S.metroPillars.push(sig);
+  });
+}
+
+// ── Junction Crosswalks ──
+const junctionZs = [];
+for (let z = -20; z > -240; z -= 60 + Math.random() * 40) junctionZs.push(z);
+junctionZs.forEach(jz => {
+  const stripeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.25, transparent: true, side: THREE.DoubleSide });
+  for (let x = -5; x <= 5; x += 1.2) {
+    const geo = new THREE.PlaneGeometry(0.3, 0.8);
+    const m = new THREE.Mesh(geo, stripeMat);
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(x, 0.003, jz);
+    scene.add(m);
+    S.roadMarkings.push(m);
+  }
+});
 function createPalm(x, z) {
   const group = new THREE.Group();
 
@@ -764,19 +857,44 @@ function spawnExplosion(x, y, z) {
 }
 
 // ═══════════════════════════════════════════
+//  MEMORY MANAGEMENT
+// ═══════════════════════════════════════════
+function disposeObject(obj) {
+  if (obj.geometry) obj.geometry.dispose();
+  if (obj.material) {
+    if (Array.isArray(obj.material)) {
+      obj.material.forEach(mat => mat.dispose());
+    } else {
+      obj.material.dispose();
+    }
+  }
+  if (obj.children) {
+    obj.children.forEach(child => disposeObject(child));
+  }
+}
+
+// ═══════════════════════════════════════════
 //  COLLISION DETECTION
 // ═══════════════════════════════════════════
-function boxCollide(px, pz, pw, pd, ox, oz, ow, od) {
-  return Math.abs(px - ox) < (pw + ow) / 2 * 0.78 &&
-    Math.abs(pz - oz) < (pd + od) / 2 * 0.72;
-}
+const playerBox = new THREE.Box3();
+const obstacleBox = new THREE.Box3();
 
 function checkObstacleCollision(obs) {
   if (S.isFlying) return false;
-  return boxCollide(
-    playerGroup.position.x, playerGroup.position.z, 1.15, 1.9,
-    obs.position.x, obs.position.z, obs.userData.width || 1.5, obs.userData.depth || 3.0
+  const halfW = 0.5;
+  const halfD = 0.8;
+  playerBox.min.set(
+    playerGroup.position.x - halfW,
+    playerGroup.position.y - 0.2,
+    playerGroup.position.z - halfD
   );
+  playerBox.max.set(
+    playerGroup.position.x + halfW,
+    playerGroup.position.y + 1.0,
+    playerGroup.position.z + halfD
+  );
+  obstacleBox.setFromObject(obs);
+  return playerBox.intersectsBox(obstacleBox);
 }
 
 function checkZoneCollision(zone) {
@@ -863,11 +981,14 @@ function spawnDropoffZone() {
 // ═══════════════════════════════════════════
 function updateZone() {
   const prev = S.currentZone;
-  S.zoneTimer += S.speed * 0.016;
-  if (S.zoneTimer > 35) {
-    S.zoneTimer = 0;
-    S.currentZone = (S.currentZone + 1) % ZONES.length;
+  let zone = ZONES.length - 1;
+  for (let i = 0; i < ZONE_BOUNDARIES.length; i++) {
+    if (S.distanceTraveled < ZONE_BOUNDARIES[i]) {
+      zone = i;
+      break;
+    }
   }
+  S.currentZone = zone;
 
   if (prev !== S.currentZone) {
     const z = ZONES[S.currentZone];
@@ -876,8 +997,8 @@ function updateZone() {
     scene.background = new THREE.Color(z.skyTop);
     ground.material.color.set(z.groundColor);
 
-    // Backwater visibility boost for Fort Kochi
-    waterMat.opacity = S.currentZone === 2 ? 0.7 : 0.3;
+    // Backwater visibility boost for Ernakulam corridor
+    waterMat.opacity = S.currentZone === 5 ? 0.7 : 0.3;
 
     DOM.zoneTransTitle.textContent = z.name;
     DOM.zoneTransSub.textContent = z.subtitle;
@@ -970,6 +1091,188 @@ function showPopup(text, className) {
 }
 
 // ═══════════════════════════════════════════
+//  MAP DATA LOADER
+// ═══════════════════════════════════════════
+async function loadMapData() {
+  try {
+    const response = await fetch('./level_data.json');
+    const rawData = await response.json();
+    const elements = rawData.elements || [];
+
+    const namedElements = elements.filter(el =>
+      el.tags && (el.tags.highway === 'traffic_signals' || el.tags.barrier) && el.tags.name
+    );
+    // Find northernmost node (Thrissur side) as start reference
+    let startLat = 0;
+    namedElements.forEach(n => { if (n.lat > startLat) startLat = n.lat; });
+    if (startLat === 0) startLat = 10.535;
+
+    const LAT_TO_GAME_DISTANCE = 50000;
+
+    S.waypoints = namedElements
+      .map(point => {
+        const latDiff = startLat - point.lat;
+        const gameDistance = latDiff * LAT_TO_GAME_DISTANCE;
+        return {
+          lat: point.lat,
+          lon: point.lon,
+          name: point.tags.name,
+          isToll: point.tags.barrier === 'toll_booth',
+          triggerDistance: Math.max(0, gameDistance),
+          spawned: false
+        };
+      })
+      .sort((a, b) => a.triggerDistance - b.triggerDistance);
+
+    console.log(`🗺️ Map Loaded! ${S.waypoints.length} named POIs. Start: Thrissur → End: Ernakulam`);
+    S.waypoints.forEach(w => console.log(`  ${w.triggerDistance.toFixed(0)}: ${w.name}${w.isToll ? ' (toll)' : ''}`));
+  } catch (err) {
+    console.error('Failed to load map data.', err);
+  }
+}
+loadMapData();
+
+// ═══════════════════════════════════════════
+//  ROADSIDE SIGNS
+// ═══════════════════════════════════════════
+function createSpeedSign(x, z, limit) {
+  const g = new THREE.Group();
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.8 });
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 3.2, 6), poleMat);
+  pole.position.y = 1.6;
+  g.add(pole);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 128; canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.beginPath();
+  ctx.arc(64, 64, 58, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = '#cc0000';
+  ctx.stroke();
+  ctx.font = 'bold 48px Arial';
+  ctx.fillStyle = '#000000';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(limit), 64, 64);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const signMat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+  const sign = new THREE.Mesh(new THREE.CircleGeometry(0.7, 16), signMat);
+  sign.position.set(0, 3.0, 0);
+  g.add(sign);
+
+  g.position.set(x, 0, z);
+  g.rotation.y = x < 0 ? 0 : Math.PI;
+  return g;
+}
+
+function createDirectionBoard(x, z, text) {
+  const g = new THREE.Group();
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.8 });
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 3.2, 6), poleMat);
+  pole.position.y = 1.6;
+  g.add(pole);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 96;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#1a6b1a';
+  ctx.fillRect(0, 0, 256, 96);
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(4, 4, 248, 88);
+  ctx.font = 'bold 36px Arial';
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text || 'NH 544', 128, 48);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const boardMat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.7), boardMat);
+  board.position.set(0, 3.2, 0);
+  g.add(board);
+
+  g.position.set(x, 0, z);
+  g.rotation.y = x < 0 ? 0 : Math.PI;
+  return g;
+}
+
+// ═══════════════════════════════════════════
+//  TRAFFIC JUNCTION SPAWNER
+// ═══════════════════════════════════════════
+function spawnEducationalJunction(waypoint) {
+  console.log(`🚦 Approaching: ${waypoint.name}`);
+
+  showPopup(`🚦 ${waypoint.name} — STOP AT LINE`, 'savari-popup dropoff');
+
+  // Glowing red stop line
+  const lineGeo = new THREE.PlaneGeometry(ROAD.totalWidth, 2.5);
+  const lineMat = new THREE.MeshBasicMaterial({
+    color: 0xff2200,
+    transparent: true,
+    opacity: 0.7,
+    side: THREE.DoubleSide
+  });
+  const stopLine = new THREE.Mesh(lineGeo, lineMat);
+  stopLine.rotation.x = -Math.PI / 2;
+  stopLine.position.set(0, 0.05, -150);
+  scene.add(stopLine);
+
+  // White border on stop line
+  const borderMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  const border = new THREE.Mesh(new THREE.PlaneGeometry(ROAD.totalWidth + 0.5, 0.15), borderMat);
+  border.rotation.x = -Math.PI / 2;
+  border.position.set(0, 0.055, -150);
+  scene.add(border);
+  S.roadMarkings.push(border);
+
+  // 3D signal poles on both sides
+  [-1, 1].forEach(side => {
+    const sig = createTrafficSignal(side * (ROAD.halfWidth + 2.5), -150);
+    scene.add(sig);
+    S.roadMarkings.push(sig);
+  });
+
+  // Zebra crosswalk stripes
+  for (let x = -4.5; x <= 4.5; x += 1.0) {
+    const stripe = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.25, 0.7),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.35, transparent: true, side: THREE.DoubleSide })
+    );
+    stripe.rotation.x = -Math.PI / 2;
+    stripe.position.set(x, 0.01, -147.5);
+    scene.add(stripe);
+    S.roadMarkings.push(stripe);
+  }
+
+  // Show junction timer
+  const timerEl = document.getElementById('junction-timer');
+  const nameEl = document.getElementById('junction-timer-name');
+  const fillEl = document.getElementById('junction-timer-fill');
+  if (timerEl && nameEl) {
+    nameEl.textContent = '🛑 STOP — ' + waypoint.name.replace('Junction', 'Jct');
+    timerEl.style.display = 'block';
+  }
+
+  // Show STOP instruction
+  const stopEl = document.getElementById('stop-instruction');
+  if (stopEl) stopEl.classList.add('visible');
+
+  S.activeTrafficLight = {
+    mesh: stopLine,
+    state: 'red',
+    waypointData: waypoint,
+    timerEl: timerEl,
+    timerFill: fillEl,
+    stopEl: stopEl
+  };
+}
+
+// ═══════════════════════════════════════════
 //  GAME LIFECYCLE
 // ═══════════════════════════════════════════
 function startGame() {
@@ -989,6 +1292,7 @@ function startGame() {
 }
 
 function gameOver(hitType = 'traffic') {
+  if (S.over) return;
   S.over = true;
   DOM.gameOverZone.textContent = ZONES[S.currentZone].name;
   DOM.gameOverScore.textContent = S.score;
@@ -1022,7 +1326,7 @@ function gameOver(hitType = 'traffic') {
       body: JSON.stringify({
         contents: [{
           parts: [{
-            text: `You are a sarcastic Kochi auto-rickshaw driver. The player just crashed their auto in the game. They scored ${S.score} points, died in ${ZONES[S.currentZone].name}, and crashed into a ${hitType}. Write a short, funny, 2-sentence insult in Manglish (Malayalam written in English) making fun of their driving skills.`
+            text: `Act as a highly sarcastic Kochi auto driver. The player scored ${S.score} and crashed into a ${hitType} in ${ZONES[S.currentZone].name}. Give me ONE short, ruthless insult in Manglish. No quotes, no markdown, under 15 words.`
           }]
         }]
       })
@@ -1042,7 +1346,7 @@ function gameOver(hitType = 'traffic') {
 }
 
 function clearArray(arr) {
-  arr.forEach(o => scene.remove(o));
+  arr.forEach(o => { scene.remove(o); disposeObject(o); });
   arr.length = 0;
 }
 
@@ -1054,11 +1358,20 @@ function restartGame() {
   clearArray(S.pickupZones);
   clearArray(S.dropoffZones);
   clearArray(S.gridlockWalls);
-  S.particles.forEach(p => scene.remove(p.mesh));
+  clearArray(S.roadSigns);
+  S.particles.forEach(p => { scene.remove(p.mesh); disposeObject(p.mesh); });
   S.particles.length = 0;
 
+  if (S.activeTrafficLight) {
+    scene.remove(S.activeTrafficLight.mesh);
+    disposeObject(S.activeTrafficLight.mesh);
+    if (S.activeTrafficLight.timerEl) S.activeTrafficLight.timerEl.style.display = 'none';
+    if (S.activeTrafficLight.stopEl) S.activeTrafficLight.stopEl.classList.remove('visible');
+    S.activeTrafficLight = null;
+  }
+
   Object.assign(S, {
-    over: false, score: 0, speed: 0.32,
+    over: false, score: 0, speed: 0, velocity: 0,
     playerX: -3.5, playerTargetX: -3.5,
     steerSpeed: S.baseSteerSpeed,
     isFlying: false, flyTimer: 0,
@@ -1066,9 +1379,15 @@ function restartGame() {
     hasCustomer: false,
     gridlockTimer: 0, gridlockWarning: false, gridlockActive: false,
     obstacleTimer: 0, oncomingTimer: 0, coinTimer: 0,
-    potholeTimer: 0, savariPickupTimer: 0,
-    distanceTraveled: 0, currentZone: 0, zoneTimer: 0,
+    potholeTimer: 0, signTimer: 0, savariPickupTimer: 0,
+    distanceTraveled: 0, currentZone: 0,
+    nextWaypointIndex: 0, gear: 1, gearChangeCooldown: 0, junctionApproachDist: null,
   });
+
+  const jTimer = document.getElementById('junction-timer');
+  if (jTimer) jTimer.style.display = 'none';
+
+  S.waypoints.forEach(wp => wp.spawned = false);
 
   playerGroup.position.set(-3.5, 0, 0);
   wingGroup.visible = false;
@@ -1105,9 +1424,101 @@ function animate() {
     return;
   }
 
-  // ── Speed ──
-  S.speed = Math.min(S.speed + S.speedInc, S.maxSpeed);
+  // ── Physics & Gear System ──
+  if (S.gearChangeCooldown > 0) S.gearChangeCooldown -= dt;
+  const gearFactor = S.velocity / S.maxVelocity;
+  // Auto-shift up
+  if (S.gear < S.maxGear && gearFactor > S.gearCeil[S.gear] * 0.92 && S.gearChangeCooldown <= 0) {
+    S.gear++;
+    S.gearChangeCooldown = 0.3;
+  }
+  // Auto-shift down
+  if (S.gear > 1 && gearFactor < S.gearFloor[S.gear] * 0.8 && S.gearChangeCooldown <= 0) {
+    S.gear--;
+    S.gearChangeCooldown = 0.2;
+  }
+
+  const accel = S.gearAccel[S.gear];
+  if (keys['ArrowUp'] || keys['KeyW']) {
+    S.velocity = Math.min(S.velocity + accel, S.maxVelocity * S.gearCeil[S.gear]);
+  } else if (keys['ArrowDown'] || keys['KeyS']) {
+    S.velocity = Math.max(S.velocity - S.braking, 0);
+  } else {
+    S.velocity = Math.max(S.velocity - S.friction, 0);
+  }
+  S.speed = S.velocity;
   S.distanceTraveled += S.speed;
+
+  // ── MAP WAYPOINT TRIGGER ──
+  if (S.waypoints.length > 0 && S.nextWaypointIndex < S.waypoints.length) {
+    const nextWP = S.waypoints[S.nextWaypointIndex];
+    if (S.distanceTraveled > nextWP.triggerDistance - 150 && !nextWP.spawned) {
+      nextWP.spawned = true;
+      if (nextWP.isToll) {
+        showPopup('🛑 ' + nextWP.name, 'savari-popup dropoff');
+      } else {
+        spawnEducationalJunction(nextWP);
+      }
+    }
+    if (S.distanceTraveled > nextWP.triggerDistance + 50) {
+      S.nextWaypointIndex++;
+    }
+  }
+
+  // ── TRAFFIC LIGHT LOGIC ──
+  if (S.activeTrafficLight) {
+    S.activeTrafficLight.mesh.position.z += S.speed;
+
+    // Compute approach progress (150 → 0 units ahead)
+    const distToStop = -S.activeTrafficLight.mesh.position.z;
+    let pct = Math.max(0, Math.min(100, (distToStop / 150) * 100));
+    if (S.activeTrafficLight.timerFill) {
+      S.activeTrafficLight.timerFill.style.width = pct + '%';
+    }
+
+    if (S.activeTrafficLight.mesh.position.z > -2 && S.activeTrafficLight.mesh.position.z < 2) {
+      // Hide timer and stop instruction on arrival
+      if (S.activeTrafficLight.timerEl) S.activeTrafficLight.timerEl.style.display = 'none';
+      if (S.activeTrafficLight.stopEl) S.activeTrafficLight.stopEl.classList.remove('visible');
+
+      if (S.velocity > 0.05) {
+        gameOver('Red Light Violation');
+        const aiRoastEl = document.getElementById('ai-roast');
+        if (aiRoastEl) {
+          aiRoastEl.innerHTML = `
+            <strong style="color:red">AUTO CHETTAN SAYS:</strong><br/>
+            Eda mone! That was a red light at ${S.activeTrafficLight.waypointData.name}! <br/>
+            Jumping a red signal is an offense under Section 119 of the Motor Vehicles Act.
+            Always slow down when approaching junctions!
+          `;
+        }
+        return;
+      } else {
+        showPopup('✅ Good Stop! Light is Green.', 'savari-popup pickup');
+        S.activeTrafficLight.state = 'green';
+        if (S.activeTrafficLight.stopEl) S.activeTrafficLight.stopEl.classList.remove('visible');
+        scene.remove(S.activeTrafficLight.mesh);
+        disposeObject(S.activeTrafficLight.mesh);
+        S.activeTrafficLight = null;
+      }
+    }
+    if (S.activeTrafficLight && S.activeTrafficLight.mesh.position.z > 20) {
+      if (S.activeTrafficLight.timerEl) S.activeTrafficLight.timerEl.style.display = 'none';
+      if (S.activeTrafficLight.stopEl) S.activeTrafficLight.stopEl.classList.remove('visible');
+      scene.remove(S.activeTrafficLight.mesh);
+      disposeObject(S.activeTrafficLight.mesh);
+      S.activeTrafficLight = null;
+    }
+  }
+
+  // ── Gear Display ──
+  const gearEl = document.getElementById('gear-value');
+  if (gearEl) gearEl.textContent = S.gear;
+
+  // ── Speedometer ──
+  const displaySpeed = Math.floor((S.velocity / S.maxVelocity) * 100);
+  const speedoEl = document.getElementById('speed-value');
+  if (speedoEl) speedoEl.textContent = displaySpeed;
 
   // ── Score ──
   const mult = S.hasCustomer ? S.customerMultiplier : 1;
@@ -1175,13 +1586,14 @@ function animate() {
 
   for (let i = S.obstacles.length - 1; i >= 0; i--) {
     const obs = S.obstacles[i];
-    const relSpeed = S.speed * (1 - (obs.userData.speedMultiplier || 0));
-    obs.position.z += relSpeed;
+    const atSignal = S.activeTrafficLight && S.activeTrafficLight.mesh.position.z < 20 && S.activeTrafficLight.mesh.position.z > -5;
+    const effectiveScroll = atSignal ? 0 : S.speed;
+    obs.position.z += effectiveScroll * (1 - (obs.userData.speedMultiplier || 0));
 
     if (obs.position.z > 18) {
       scene.remove(obs);
+      disposeObject(obs);
       S.obstacles.splice(i, 1);
-      // Also remove from gridlockWalls if present
       const gi = S.gridlockWalls.indexOf(obs);
       if (gi >= 0) S.gridlockWalls.splice(gi, 1);
       continue;
@@ -1207,6 +1619,7 @@ function animate() {
 
     if (v.position.z > 18) {
       scene.remove(v);
+      disposeObject(v);
       S.oncomingVehicles.splice(i, 1);
       continue;
     }
@@ -1232,6 +1645,7 @@ function animate() {
 
     if (c.position.z > 18) {
       scene.remove(c);
+      disposeObject(c);
       S.coins.splice(i, 1);
       continue;
     }
@@ -1239,6 +1653,7 @@ function animate() {
     if (!c.userData.collected && checkCoinCollision(c)) {
       c.userData.collected = true;
       scene.remove(c);
+      disposeObject(c);
       S.coins.splice(i, 1);
 
       S.boostMeter = Math.min(S.boostMeter + 25, S.boostMax);
@@ -1275,7 +1690,30 @@ function animate() {
     S.potholes[i].position.z += S.speed;
     if (S.potholes[i].position.z > 18) {
       scene.remove(S.potholes[i]);
+      disposeObject(S.potholes[i]);
       S.potholes.splice(i, 1);
+    }
+  }
+
+  // ── Road Signs (speed limit, direction boards) ──
+  S.signTimer += dt;
+  if (S.signTimer > 4.0) {
+    S.signTimer = 0;
+    [-1, 1].forEach(side => {
+      const z = -140 - Math.random() * 100;
+      const sign = Math.random() > 0.5
+        ? createSpeedSign(side * (ROAD.halfWidth + 3), z, 40 + Math.floor(Math.random() * 30))
+        : createDirectionBoard(side * (ROAD.halfWidth + 3), z, '');
+      scene.add(sign);
+      S.roadSigns.push(sign);
+    });
+  }
+  for (let i = S.roadSigns.length - 1; i >= 0; i--) {
+    S.roadSigns[i].position.z += S.speed;
+    if (S.roadSigns[i].position.z > 18) {
+      scene.remove(S.roadSigns[i]);
+      disposeObject(S.roadSigns[i]);
+      S.roadSigns.splice(i, 1);
     }
   }
 
@@ -1296,6 +1734,7 @@ function animate() {
 
     if (pz.position.z > 18) {
       scene.remove(pz);
+      disposeObject(pz);
       S.pickupZones.splice(i, 1);
       continue;
     }
@@ -1310,6 +1749,7 @@ function animate() {
       console.log('🔊 SFX: Customer picked up!');
 
       scene.remove(pz);
+      disposeObject(pz);
       S.pickupZones.splice(i, 1);
 
       // Spawn dropoff zone ahead
@@ -1326,6 +1766,7 @@ function animate() {
 
     if (dz.position.z > 18) {
       scene.remove(dz);
+      disposeObject(dz);
       S.dropoffZones.splice(i, 1);
       continue;
     }
@@ -1342,6 +1783,7 @@ function animate() {
       console.log('🔊 SFX: Customer dropped off! +500 bonus');
 
       scene.remove(dz);
+      disposeObject(dz);
       S.dropoffZones.splice(i, 1);
 
       // Celebration particles
@@ -1420,6 +1862,7 @@ function animate() {
     p.mesh.material.opacity = Math.max(0, p.life / p.maxLife);
     if (p.life <= 0) {
       scene.remove(p.mesh);
+      disposeObject(p.mesh);
       S.particles.splice(i, 1);
     }
   }
@@ -1427,11 +1870,24 @@ function animate() {
   // ── Camera follow ──
   const camTargetX = S.playerX * 0.35 + (1 - 0.35) * -3.5;
   const camTargetY = S.isFlying ? 10 : 5.8;
+
+  const targetFOV = S.isFlying ? 80 : 65 + (S.speed * 10);
+  camera.fov += (targetFOV - camera.fov) * 0.05;
+  camera.updateProjectionMatrix();
+
   camera.position.x += (camTargetX - camera.position.x) * 0.045;
   camera.position.y += (camTargetY - camera.position.y) * 0.04;
+
+  let shakeX = 0;
+  let shakeY = 0;
+  if (S.speed > 0.8 && !S.isFlying) {
+    shakeX = (Math.random() - 0.5) * 0.05;
+    shakeY = (Math.random() - 0.5) * 0.05;
+  }
+
   camera.lookAt(
-    playerGroup.position.x * 0.4 + (1 - 0.4) * -3.5,
-    S.isFlying ? 4.5 : 1,
+    (playerGroup.position.x * 0.4 + (1 - 0.4) * -3.5) + shakeX,
+    (S.isFlying ? 4.5 : 1) + shakeY,
     -12
   );
 
@@ -1460,15 +1916,35 @@ function animate() {
     ctx.lineTo(px + 6, 142);
     ctx.fill();
 
-    // Obstacles
-    ctx.fillStyle = '#ff4444';
-    S.obstacles.concat(S.oncomingVehicles).forEach(obs => {
+    // Obstacles (same-direction = squares, oncoming = triangles pointing toward player)
+    S.obstacles.forEach(obs => {
       const ox = 75 + (obs.position.x / ROAD.boundaryRight) * 50;
-      // map z from -150 to 15 -> 0 to 130
-      const oz = 130 - ((obs.position.z + 150) / 165) * 130;
+      const oz = ((obs.position.z + 150) / 165) * 150;
       if (oz > 0 && oz < 150) {
+        ctx.fillStyle = '#ff4444';
+        ctx.fillRect(ox - 2, oz - 2, 4, 4);
+      }
+    });
+    S.oncomingVehicles.forEach(obs => {
+      const ox = 75 + (obs.position.x / ROAD.boundaryRight) * 50;
+      const oz = ((obs.position.z + 150) / 165) * 150;
+      if (oz > 0 && oz < 150) {
+        ctx.fillStyle = '#ff8844';
         ctx.beginPath();
-        ctx.arc(ox, oz, 3, 0, Math.PI * 2);
+        ctx.moveTo(ox, oz - 4);
+        ctx.lineTo(ox - 3, oz + 3);
+        ctx.lineTo(ox + 3, oz + 3);
+        ctx.fill();
+      }
+    });
+    // Coins
+    S.coins.forEach(coin => {
+      const cx = 75 + (coin.position.x / ROAD.boundaryRight) * 50;
+      const cz = ((coin.position.z + 150) / 165) * 150;
+      if (cz > 0 && cz < 150) {
+        ctx.fillStyle = '#ffd700';
+        ctx.beginPath();
+        ctx.arc(cx, cz, 2, 0, Math.PI * 2);
         ctx.fill();
       }
     });
