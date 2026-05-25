@@ -28,12 +28,12 @@ const ROAD = {
 const ZONES = [
   { name: 'Thrissur City', subtitle: 'Departing Thrissur', fogColor: 0x0a1118, skyTop: 0x0a1118, skyBot: 0x1a2a22, groundColor: 0x0d1a0f },
   { name: 'Paliyekkara Toll', subtitle: 'Toll plaza — slow down!', fogColor: 0x0f0a1a, skyTop: 0x0f0a1a, skyBot: 0x1a1428, groundColor: 0x0c0f0a },
-  { name: 'NH 544 Highway', subtitle: 'Open road ahead', fogColor: 0x0c1610, skyTop: 0x0c1610, skyBot: 0x1a2818, groundColor: 0x0e1a0c },
-  { name: 'Labour Junction', subtitle: 'Traffic merging', fogColor: 0x0a1118, skyTop: 0x0a1118, skyBot: 0x1a2a22, groundColor: 0x0d1a0f },
-  { name: 'HMT Junction', subtitle: 'Industrial area', fogColor: 0x0f0a1a, skyTop: 0x0f0a1a, skyBot: 0x1a1428, groundColor: 0x0c0f0a },
-  { name: 'Ernakulam Corridor', subtitle: 'City junctions ahead', fogColor: 0x081a1e, skyTop: 0x081a1e, skyBot: 0x0f2a2a, groundColor: 0x0a1812 },
+  { name: 'Chalakudy & Koratty', subtitle: 'Highway cruising', fogColor: 0x0c1610, skyTop: 0x0c1610, skyBot: 0x1a2818, groundColor: 0x0e1a0c },
+  { name: 'Angamaly & Aluva', subtitle: 'Approaching airport', fogColor: 0x0a1118, skyTop: 0x0a1118, skyBot: 0x1a2a22, groundColor: 0x0d1a0f },
+  { name: 'Kalamassery', subtitle: 'Industrial and university area', fogColor: 0x0f0a1a, skyTop: 0x0f0a1a, skyBot: 0x1a1428, groundColor: 0x0c0f0a },
+  { name: 'Ernakulam City', subtitle: 'Destination approach', fogColor: 0x081a1e, skyTop: 0x081a1e, skyBot: 0x0f2a2a, groundColor: 0x0a1812 },
 ];
-const ZONE_BOUNDARIES = [3000, 8000, 16000, 22000, 26000];
+const ZONE_BOUNDARIES = [600, 1600, 3200, 4400, 5200];
 
 // ─── GAME STATE ───
 const S = {
@@ -112,6 +112,10 @@ const S = {
   waypoints: [],
   nextWaypointIndex: 0,
   activeTrafficLight: null,
+  activeJunctionAssets: [],
+  activeTollBooth: null,
+  crossTraffic: [],
+  totalJourneyDistance: 0,
 };
 
 // ─── DOM REFS ───
@@ -157,7 +161,8 @@ renderer.toneMappingExposure = 0.85;
 document.body.appendChild(renderer.domElement);
 
 // ─── LIGHTING ───
-scene.add(new THREE.AmbientLight(0x3a5544, 0.55));
+const ambientLight = new THREE.AmbientLight(0x3a5544, 0.55);
+scene.add(ambientLight);
 
 const dirLight = new THREE.DirectionalLight(0xffeedd, 0.7);
 dirLight.position.set(5, 18, 8);
@@ -179,6 +184,7 @@ const streetLights = [];
 for (let i = 0; i < 3; i++) {
   const sl = new THREE.PointLight(0xffaa44, 0.5, 25);
   sl.position.set(i % 2 === 0 ? -ROAD.halfWidth - 2 : ROAD.halfWidth + 2, 7, -15 - i * 20);
+  sl.userData.baseX = sl.position.x;
   scene.add(sl);
   streetLights.push(sl);
 }
@@ -187,48 +193,74 @@ for (let i = 0; i < 3; i++) {
 //  WORLD BUILDING
 // ═══════════════════════════════════════════
 
-// ── Ground plane (vegetation) ──
-const groundGeo = new THREE.PlaneGeometry(120, 400);
-const groundMat = new THREE.MeshStandardMaterial({ color: 0x0d1a0f, roughness: 0.95 });
-const ground = new THREE.Mesh(groundGeo, groundMat);
-ground.rotation.x = -Math.PI / 2;
-ground.position.set(0, -0.15, -140);
-ground.receiveShadow = true;
-scene.add(ground);
+// ── Ground and Road Segments (Dynamic Curvature) ──
+for (let z = 10; z > -270; z -= 10) {
+  // Ground
+  const gGeo = new THREE.PlaneGeometry(120, 10.5);
+  const gMat = new THREE.MeshStandardMaterial({ color: 0x0d1a0f, roughness: 0.95 });
+  const g = new THREE.Mesh(gGeo, gMat);
+  g.rotation.x = -Math.PI / 2;
+  g.position.set(0, -0.15, z);
+  g.receiveShadow = true;
+  g.userData.baseX = 0;
+  g.userData.isLongSegment = true;
+  scene.add(g);
+  S.roadMarkings.push(g);
 
-// ── Road surface ──
-const roadGeo = new THREE.PlaneGeometry(ROAD.totalWidth, 400);
-const roadMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.92, metalness: 0.05 });
-const roadMesh = new THREE.Mesh(roadGeo, roadMat);
-roadMesh.rotation.x = -Math.PI / 2;
-roadMesh.position.set(0, -0.01, -140);
-roadMesh.receiveShadow = true;
-scene.add(roadMesh);
+  // Road
+  const rGeo = new THREE.PlaneGeometry(ROAD.totalWidth, 10.5);
+  const rMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.92, metalness: 0.05 });
+  const r = new THREE.Mesh(rGeo, rMat);
+  r.rotation.x = -Math.PI / 2;
+  r.position.set(0, -0.01, z);
+  r.receiveShadow = true;
+  r.userData.baseX = 0;
+  r.userData.isRoadSegment = true;
+  scene.add(r);
+  S.roadMarkings.push(r);
 
-// ── Grass strips alongside road ──
-function makeGrass(x, w) {
-  const geo = new THREE.PlaneGeometry(w, 400);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x1a3a1a, roughness: 0.95 });
-  const m = new THREE.Mesh(geo, mat);
-  m.rotation.x = -Math.PI / 2;
-  m.position.set(x, -0.005, -140);
-  m.receiveShadow = true;
-  scene.add(m);
+  // Grass strips
+  const grGeo = new THREE.PlaneGeometry(8, 10.5);
+  const grMat = new THREE.MeshStandardMaterial({ color: 0x1a3a1a, roughness: 0.95 });
+  
+  const gl = new THREE.Mesh(grGeo, grMat);
+  gl.rotation.x = -Math.PI / 2;
+  gl.position.set(-ROAD.halfWidth - 4, -0.005, z);
+  gl.receiveShadow = true;
+  gl.userData.baseX = -ROAD.halfWidth - 4;
+  gl.userData.isLongSegment = true;
+  scene.add(gl);
+  S.roadMarkings.push(gl);
+
+  const gr = new THREE.Mesh(grGeo, grMat);
+  gr.rotation.x = -Math.PI / 2;
+  gr.position.set(ROAD.halfWidth + 4, -0.005, z);
+  gr.receiveShadow = true;
+  gr.userData.baseX = ROAD.halfWidth + 4;
+  gr.userData.isLongSegment = true;
+  scene.add(gr);
+  S.roadMarkings.push(gr);
+
+  // Edge lines
+  const eGeo = new THREE.PlaneGeometry(0.12, 10.5);
+  const eMat = new THREE.MeshBasicMaterial({ color: 0xffcc00, side: THREE.DoubleSide });
+  
+  const el = new THREE.Mesh(eGeo, eMat);
+  el.rotation.x = -Math.PI / 2;
+  el.position.set(-ROAD.halfWidth, 0.005, z);
+  el.userData.baseX = -ROAD.halfWidth;
+  el.userData.isLongSegment = true;
+  scene.add(el);
+  S.roadMarkings.push(el);
+
+  const er = new THREE.Mesh(eGeo, eMat);
+  er.rotation.x = -Math.PI / 2;
+  er.position.set(ROAD.halfWidth, 0.005, z);
+  er.userData.baseX = ROAD.halfWidth;
+  er.userData.isLongSegment = true;
+  scene.add(er);
+  S.roadMarkings.push(er);
 }
-makeGrass(-ROAD.halfWidth - 4, 8);
-makeGrass(ROAD.halfWidth + 4, 8);
-
-// ── Road edge lines ──
-function makeEdgeLine(x, color) {
-  const geo = new THREE.PlaneGeometry(0.12, 400);
-  const mat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide });
-  const m = new THREE.Mesh(geo, mat);
-  m.rotation.x = -Math.PI / 2;
-  m.position.set(x, 0.005, -140);
-  scene.add(m);
-}
-makeEdgeLine(-ROAD.halfWidth, 0xffcc00);
-makeEdgeLine(ROAD.halfWidth, 0xffcc00);
 
 // ── Median / Road Divider ──
 for (let z = 10; z > -250; z -= 2.5) {
@@ -237,18 +269,25 @@ for (let z = 10; z > -250; z -= 2.5) {
   const b = new THREE.Mesh(bGeo, bMat);
   b.position.set(ROAD.medianX, 0.17, z);
   b.castShadow = true;
+  b.userData.baseX = b.position.x;
+  b.userData.isLongSegment = true;
   scene.add(b);
   S.roadMarkings.push(b);
 }
 
 // Median yellow lines
 for (let side = -1; side <= 1; side += 2) {
-  const lGeo = new THREE.PlaneGeometry(0.07, 400);
-  const lMat = new THREE.MeshBasicMaterial({ color: 0xffcc00, side: THREE.DoubleSide });
-  const l = new THREE.Mesh(lGeo, lMat);
-  l.rotation.x = -Math.PI / 2;
-  l.position.set(ROAD.medianX + side * 0.35, 0.008, -140);
-  scene.add(l);
+  for (let z = 10; z > -270; z -= 10) {
+    const lGeo = new THREE.PlaneGeometry(0.07, 10.5);
+    const lMat = new THREE.MeshBasicMaterial({ color: 0xffcc00, side: THREE.DoubleSide });
+    const l = new THREE.Mesh(lGeo, lMat);
+    l.rotation.x = -Math.PI / 2;
+    l.position.set(ROAD.medianX + side * 0.35, 0.008, z);
+    l.userData.baseX = l.position.x;
+    l.userData.isLongSegment = true;
+    scene.add(l);
+    S.roadMarkings.push(l);
+  }
 }
 
 // ── Lane dashes ──
@@ -259,6 +298,8 @@ function makeDashes(x, opacity) {
     const m = new THREE.Mesh(geo, mat);
     m.rotation.x = -Math.PI / 2;
     m.position.set(x, 0.004, z);
+    m.userData.baseX = m.position.x;
+    m.userData.isLongSegment = true;
     scene.add(m);
     S.roadMarkings.push(m);
   }
@@ -268,13 +309,19 @@ makeDashes(3.6, 0.20);    // between oncoming lanes
 
 // ── Sidewalk / Curb ──
 function makeCurb(x) {
-  const geo = new THREE.BoxGeometry(2, 0.25, 400);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.9 });
-  const m = new THREE.Mesh(geo, mat);
-  m.position.set(x, 0.1, -140);
-  m.receiveShadow = true;
-  scene.add(m);
+  for (let z = 10; z > -270; z -= 10) {
+    const geo = new THREE.BoxGeometry(2, 0.25, 10.5);
+    const mat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.9 });
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, 0.1, z);
+    m.receiveShadow = true;
+    m.userData.baseX = m.position.x;
+    m.userData.isLongSegment = true;
+    scene.add(m);
+    S.roadMarkings.push(m);
+  }
 }
+
 makeCurb(-ROAD.halfWidth - 1);
 makeCurb(ROAD.halfWidth + 1);
 
@@ -287,7 +334,8 @@ function buildMetroPillars() {
     const mp = new THREE.Mesh(mGeo, mMat);
     mp.position.set(ROAD.medianX, 5, z);
     mp.castShadow = true;
-    scene.add(mp);
+    mp.userData.baseX = mp.position.x;
+  scene.add(mp);
     S.metroPillars.push(mp);
 
     // Left & right pillars
@@ -297,7 +345,8 @@ function buildMetroPillars() {
       const p = new THREE.Mesh(pGeo, pMat);
       p.position.set(x, 5.5, z);
       p.castShadow = true;
-      scene.add(p);
+      p.userData.baseX = p.position.x;
+  scene.add(p);
       S.metroPillars.push(p);
 
       if (idx === 1) {
@@ -306,7 +355,8 @@ function buildMetroPillars() {
         const beam = new THREE.Mesh(beamGeo, beamMat);
         beam.position.set(0, 11.2, z);
         beam.castShadow = true;
-        scene.add(beam);
+        beam.userData.baseX = beam.position.x;
+  scene.add(beam);
         S.metroPillars.push(beam);
       }
     });
@@ -315,7 +365,7 @@ function buildMetroPillars() {
 buildMetroPillars();
 
 // ── Traffic Signals (Kerala-style) ──
-function createTrafficSignal(x, z) {
+function createTrafficSignal(x, z, forceState) {
   const g = new THREE.Group();
   // Pole
   const poleGeo = new THREE.CylinderGeometry(0.06, 0.08, 3.2, 6);
@@ -333,7 +383,7 @@ function createTrafficSignal(x, z) {
 
   // Lights (red, yellow, green) — only one active
   const lightStates = ['red', 'yellow', 'green'];
-  const active = lightStates[Math.floor(Math.random() * 3)];
+  const active = forceState || lightStates[Math.floor(Math.random() * 3)];
   const lightColors = { red: 0xff2200, yellow: 0xffcc00, green: 0x22dd44 };
   [2.85, 3.0, 3.15].forEach((y, i) => {
     const lGeo = new THREE.SphereGeometry(0.06, 6, 6);
@@ -358,7 +408,8 @@ function createTrafficSignal(x, z) {
 for (let z = 5; z > -240; z -= 40 + Math.random() * 30) {
   [-1, 1].forEach(side => {
     const sig = createTrafficSignal(side * (ROAD.halfWidth + 2.5), z);
-    scene.add(sig);
+    sig.userData.baseX = sig.position.x;
+  scene.add(sig);
     S.metroPillars.push(sig);
   });
 }
@@ -373,10 +424,144 @@ junctionZs.forEach(jz => {
     const m = new THREE.Mesh(geo, stripeMat);
     m.rotation.x = -Math.PI / 2;
     m.position.set(x, 0.003, jz);
-    scene.add(m);
+    m.userData.baseX = m.position.x;
+  scene.add(m);
     S.roadMarkings.push(m);
   }
 });
+
+// ═══════════════════════════════════════════
+//  TOLL BOOTH FACTORY
+// ═══════════════════════════════════════════
+function createTollBooth(waypointName) {
+  const g = new THREE.Group();
+
+  // Support pillars on each side
+  [-1, 1].forEach(side => {
+    const pillarGeo = new THREE.BoxGeometry(0.6, 5, 0.6);
+    const pillarMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.7 });
+    const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+    pillar.position.set(side * (ROAD.halfWidth - 1), 2.5, 0);
+    pillar.castShadow = true;
+    g.add(pillar);
+  });
+
+  // Horizontal beam (yellow/black)
+  const beamGeo = new THREE.BoxGeometry(ROAD.totalWidth - 2, 0.8, 0.5);
+  const beamMat = new THREE.MeshStandardMaterial({ color: 0xddcc00, roughness: 0.5, metalness: 0.2 });
+  const beam = new THREE.Mesh(beamGeo, beamMat);
+  beam.position.set(0, 5, 0);
+  beam.castShadow = true;
+  g.add(beam);
+
+  // Black stripes on beam
+  for (let s = -5; s <= 5; s += 2) {
+    const stripeGeo = new THREE.BoxGeometry(0.5, 0.82, 0.52);
+    const stripeMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+    const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+    stripe.position.set(s, 5, 0);
+    g.add(stripe);
+  }
+
+  // Barrier arms per lane (lowered position)
+  g.userData = { type: 'tollbooth', name: waypointName, barrierArms: [] };
+  
+  ROAD.playerLanes.forEach((laneX, index) => {
+    // The arm pivot
+    const armPivot = new THREE.Group();
+    armPivot.position.set(laneX - 1.1, 3.5, 0.5); // Pivot on the left side of the lane
+    
+    const armGeo = new THREE.BoxGeometry(2.2, 0.12, 0.12);
+    const armMat = new THREE.MeshStandardMaterial({ color: 0xff4444, roughness: 0.5, emissive: 0xff2200, emissiveIntensity: 0.2 });
+    const arm = new THREE.Mesh(armGeo, armMat);
+    arm.position.set(1.1, 0, 0); // Offset so pivot is at end
+    armPivot.add(arm);
+    
+    g.add(armPivot);
+    g.userData.barrierArms.push(armPivot);
+
+    // If it's the right-most player lane, block it with a static car to force FASTag lane usage
+    if (index === 1) {
+      const blockedCar = createObstacleMesh();
+      blockedCar.position.set(laneX, 0, 3);
+      g.add(blockedCar);
+      
+      const cashSignGeo = new THREE.PlaneGeometry(1.2, 0.5);
+      const cashSignMat = new THREE.MeshBasicMaterial({ color: 0xcc2222 });
+      const cashSign = new THREE.Mesh(cashSignGeo, cashSignMat);
+      cashSign.position.set(laneX, 4.5, 0.6);
+      g.add(cashSign);
+    }
+  });
+
+  // Toll booth structure (left side)
+  const boothGeo = new THREE.BoxGeometry(2, 2.5, 2);
+  const boothMat = new THREE.MeshStandardMaterial({ color: 0x2a3a4a, roughness: 0.7 });
+  const booth = new THREE.Mesh(boothGeo, boothMat);
+  booth.position.set(-ROAD.halfWidth + 1.5, 1.25, 0);
+  booth.castShadow = true;
+  g.add(booth);
+
+  // Booth window
+  const winGeo = new THREE.PlaneGeometry(0.8, 0.6);
+  const winMat = new THREE.MeshBasicMaterial({ color: 0x88ccff, opacity: 0.5, transparent: true });
+  const win = new THREE.Mesh(winGeo, winMat);
+  win.position.set(-ROAD.halfWidth + 1.5, 1.8, 1.05);
+  g.add(win);
+
+  // Booth roof
+  const roofGeo = new THREE.BoxGeometry(2.4, 0.15, 2.4);
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.6 });
+  const roof = new THREE.Mesh(roofGeo, roofMat);
+  roof.position.set(-ROAD.halfWidth + 1.5, 2.6, 0);
+  g.add(roof);
+
+  // FASTag sign (educational)
+  const canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#1a4a1a';
+  ctx.fillRect(0, 0, 256, 128);
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(4, 4, 248, 120);
+  ctx.font = 'bold 36px Arial';
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('FASTag \u2714', 128, 35);
+  ctx.font = 'bold 20px Arial';
+  ctx.fillStyle = '#ffcc00';
+  ctx.fillText('SLOW DOWN', 128, 70);
+  ctx.font = '14px Arial';
+  ctx.fillStyle = '#88ff88';
+  const shortName = (waypointName || 'Toll Plaza').substring(0, 30);
+  ctx.fillText(shortName, 128, 100);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const signMat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(3, 1.5), signMat);
+  sign.position.set(0, 6.5, -2);
+  g.add(sign);
+
+  // Warning lights (amber flashers)
+  [-1, 1].forEach(side => {
+    const lightGeo = new THREE.SphereGeometry(0.15, 8, 8);
+    const lightMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+    const light = new THREE.Mesh(lightGeo, lightMat);
+    light.position.set(side * 3, 5.5, 0);
+    g.add(light);
+
+    const glow = new THREE.PointLight(0xffaa00, 0.3, 8);
+    glow.position.set(side * 3, 5.5, 0.5);
+    g.add(glow);
+  });
+
+  g.userData.type = 'tollbooth';
+  g.userData.name = waypointName;
+  return g;
+}
+
 function createPalm(x, z) {
   const group = new THREE.Group();
 
@@ -420,6 +605,7 @@ function createPalm(x, z) {
   }
 
   group.position.set(x, 0, z);
+  group.userData.baseX = group.position.x;
   scene.add(group);
   S.palms.push(group);
   return group;
@@ -452,7 +638,8 @@ function buildEnvironment() {
       const xPos = side * (ROAD.halfWidth + 7 + Math.random() * 10);
       bldg.position.set(xPos, h / 2, z);
       bldg.receiveShadow = true;
-      scene.add(bldg);
+      bldg.userData.baseX = bldg.position.x;
+  scene.add(bldg);
       S.buildings.push(bldg);
 
       // Roof (terracotta)
@@ -464,7 +651,8 @@ function buildEnvironment() {
         });
         const roof = new THREE.Mesh(rGeo, rMat);
         roof.position.set(xPos, h + 0.15, z);
-        scene.add(roof);
+        roof.userData.baseX = roof.position.x;
+  scene.add(roof);
         S.buildings.push(roof);
       }
 
@@ -480,8 +668,21 @@ function buildEnvironment() {
         const win = new THREE.Mesh(wGeo, wMat);
         win.position.set(xPos + side * (-w / 2 - 0.01), 1.5 + Math.random() * (h - 2), z - d / 2 + Math.random() * d);
         win.rotation.y = side * Math.PI / 2;
-        scene.add(win);
+        win.userData.baseX = win.position.x;
+  scene.add(win);
         S.buildings.push(win);
+      }
+
+      // Neon Lights (City Vibe)
+      if (Math.random() > 0.6) {
+        const neonColors = [0xff0055, 0x00ffcc, 0xffcc00, 0xaa00ff];
+        const nColor = neonColors[Math.floor(Math.random() * neonColors.length)];
+        const neon = new THREE.PointLight(nColor, 0, 15); // Start at 0 intensity
+        neon.position.set(xPos + side * (-w / 2 - 0.5), h / 2, z);
+        neon.userData.baseX = neon.position.x;
+        neon.userData.isNeon = true;
+        scene.add(neon);
+        S.buildings.push(neon);
       }
     });
   }
@@ -782,7 +983,8 @@ function spawnGridlockWall() {
     bus.position.set(lx + (Math.random() - 0.5) * 0.5, 0, wallZ + (Math.random() - 0.5) * 2);
     bus.userData.speedMultiplier = 0; // stationary
     bus.userData.isGridlock = true;
-    scene.add(bus);
+    bus.userData.baseX = bus.position.x;
+  scene.add(bus);
     S.obstacles.push(bus);
     S.gridlockWalls.push(bus);
   });
@@ -793,6 +995,7 @@ function spawnGridlockWall() {
   car.position.set(gapX, 0, wallZ + 3);
   car.userData.speedMultiplier = 0;
   car.userData.isGridlock = true;
+  car.userData.baseX = car.position.x;
   scene.add(car);
   S.obstacles.push(car);
   S.gridlockWalls.push(car);
@@ -808,6 +1011,7 @@ function spawnParticle(x, y, z, color, vel, life) {
   const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 });
   const m = new THREE.Mesh(geo, mat);
   m.position.set(x, y, z);
+  m.userData.baseX = m.position.x;
   scene.add(m);
   S.particles.push({
     mesh: m,
@@ -874,6 +1078,26 @@ function disposeObject(obj) {
 }
 
 // ═══════════════════════════════════════════
+//  JUNCTION CLEANUP
+// ═══════════════════════════════════════════
+function cleanupActiveJunction() {
+  if (S.activeTrafficLight) {
+    scene.remove(S.activeTrafficLight.mesh);
+    disposeObject(S.activeTrafficLight.mesh);
+    if (S.activeTrafficLight.timerEl) S.activeTrafficLight.timerEl.style.display = 'none';
+    if (S.activeTrafficLight.stopEl) S.activeTrafficLight.stopEl.classList.remove('visible');
+    S.activeTrafficLight = null;
+  }
+  S.activeJunctionAssets.forEach(asset => {
+    scene.remove(asset);
+    disposeObject(asset);
+    const idx = S.roadMarkings.indexOf(asset);
+    if (idx >= 0) S.roadMarkings.splice(idx, 1);
+  });
+  S.activeJunctionAssets.length = 0;
+}
+
+// ═══════════════════════════════════════════
 //  COLLISION DETECTION
 // ═══════════════════════════════════════════
 const playerBox = new THREE.Box3();
@@ -922,6 +1146,7 @@ function spawnSameDirectionObstacle() {
 
   obs.position.set(lane + (Math.random() - 0.5) * 0.6, 0, -130 - Math.random() * 25);
   obs.userData.speedMultiplier = 0.25 + Math.random() * 0.35;
+  obs.userData.baseX = obs.position.x;
   scene.add(obs);
   S.obstacles.push(obs);
 }
@@ -937,6 +1162,7 @@ function spawnOncomingVehicle() {
   veh.position.set(lane + (Math.random() - 0.5) * 0.4, 0, -140 - Math.random() * 30);
   // Oncoming vehicles move much faster toward player
   veh.userData.oncomingSpeed = 0.5 + Math.random() * 0.3;
+  veh.userData.baseX = veh.position.x;
   scene.add(veh);
   S.oncomingVehicles.push(veh);
 }
@@ -946,6 +1172,7 @@ function spawnCoin() {
   const allLanes = [...ROAD.playerLanes];
   const lane = allLanes[Math.floor(Math.random() * allLanes.length)];
   coin.position.set(lane + (Math.random() - 0.5) * 0.5, 1.0, -85 - Math.random() * 30);
+  coin.userData.baseX = coin.position.x;
   scene.add(coin);
   S.coins.push(coin);
 }
@@ -955,6 +1182,7 @@ function spawnPothole() {
   const x = ROAD.playerLanes[Math.floor(Math.random() * ROAD.playerLanes.length)] + (Math.random() - 0.5) * 2;
   const ph = createPothole();
   ph.position.set(x, -0.04, -95 - Math.random() * 30);
+  ph.userData.baseX = ph.position.x;
   scene.add(ph);
   S.potholes.push(ph);
 }
@@ -964,6 +1192,7 @@ function spawnPickupZone() {
   const zone = createPickupZone();
   // Place on leftmost edge of player lanes
   zone.position.set(ROAD.playerLanes[0] - 1.2, 0, -100 - Math.random() * 20);
+  zone.userData.baseX = zone.position.x;
   scene.add(zone);
   S.pickupZones.push(zone);
 }
@@ -972,6 +1201,7 @@ function spawnDropoffZone() {
   const zone = createDropoffZone();
   // Place ahead on either player lane edge
   zone.position.set(ROAD.playerLanes[1] + 1.0, 0, -110 - Math.random() * 25);
+  zone.userData.baseX = zone.position.x;
   scene.add(zone);
   S.dropoffZones.push(zone);
 }
@@ -993,9 +1223,7 @@ function updateZone() {
   if (prev !== S.currentZone) {
     const z = ZONES[S.currentZone];
     DOM.zoneName.textContent = z.name;
-    scene.fog.color.set(z.fogColor);
-    scene.background = new THREE.Color(z.skyTop);
-    ground.material.color.set(z.groundColor);
+    // Colors are now smoothly interpolated in animate()
 
     // Backwater visibility boost for Ernakulam corridor
     waterMat.opacity = S.currentZone === 5 ? 0.7 : 0.3;
@@ -1061,6 +1289,10 @@ document.getElementById('mobile-left')?.addEventListener('touchstart', e => { e.
 document.getElementById('mobile-left')?.addEventListener('touchend', () => { keys['ArrowLeft'] = false; });
 document.getElementById('mobile-right')?.addEventListener('touchstart', e => { e.preventDefault(); keys['ArrowRight'] = true; });
 document.getElementById('mobile-right')?.addEventListener('touchend', () => { keys['ArrowRight'] = false; });
+document.getElementById('mobile-up')?.addEventListener('touchstart', e => { e.preventDefault(); keys['ArrowUp'] = true; });
+document.getElementById('mobile-up')?.addEventListener('touchend', () => { keys['ArrowUp'] = false; });
+document.getElementById('mobile-down')?.addEventListener('touchstart', e => { e.preventDefault(); keys['ArrowDown'] = true; });
+document.getElementById('mobile-down')?.addEventListener('touchend', () => { keys['ArrowDown'] = false; });
 document.getElementById('mobile-boost')?.addEventListener('touchstart', e => { e.preventDefault(); activateBoost(); });
 
 function activateBoost() {
@@ -1091,6 +1323,52 @@ function showPopup(text, className) {
 }
 
 // ═══════════════════════════════════════════
+//  EDUCATIONAL OVERLAY
+// ═══════════════════════════════════════════
+function showEducationalOverlay(violationType, data) {
+  const overlay = document.getElementById('educational-overlay');
+  const iconEl = document.getElementById('edu-icon');
+  const titleEl = document.getElementById('edu-violation-title');
+  const locationEl = document.getElementById('edu-violation-location');
+  const detailsEl = document.getElementById('edu-violation-details');
+  const tipEl = document.getElementById('edu-violation-tip');
+  if (!overlay) return;
+
+  if (violationType === 'red_light') {
+    iconEl.textContent = '\ud83d\udea6';
+    titleEl.textContent = '\ud83d\udea6 RED LIGHT VIOLATION';
+    locationEl.textContent = data.junctionName || 'Unknown Junction';
+    detailsEl.innerHTML = `
+      <strong>What happened:</strong> You crossed the stop line at ${data.junctionName || 'a junction'} while the traffic signal was RED.<br><br>
+      <strong>Section 119, Motor Vehicles Act, 1988:</strong> Disobedience of orders, signals, and directions given by authorized persons or through traffic signs is punishable with a fine.<br><br>
+      <strong>Section 184 (amended 2019):</strong> Dangerous driving — running a red light endangers pedestrians and other road users.<br>
+      <span class="edu-law">Fine: \u20b91,000 (first) / \u20b92,000 (repeat) \u00b7 Penalty Points: 3</span>
+    `;
+    tipEl.textContent = 'When you see the \ud83d\uded1 STOP indicator and the red line on the road, press \u2193 (down arrow) to brake. You must come to a complete stop (0 KM/H) before the white line. The signal will turn green once you stop correctly.';
+  } else if (violationType === 'toll_violation') {
+    iconEl.textContent = '\u26a0\ufe0f';
+    titleEl.textContent = '\u26a0 TOLL BOOTH VIOLATION';
+    locationEl.textContent = data.tollName || 'Toll Plaza';
+    detailsEl.innerHTML = `
+      <strong>What happened:</strong> You crossed ${data.tollName || 'the toll booth'} at ${data.speed || '?'} KM/H — well above the 20 KM/H limit.<br><br>
+      <strong>National Highways Fee (Determination of Rates and Collection) Rules:</strong> All vehicles must slow down at toll plazas. FASTag (electronic toll collection) has been mandatory on all National Highways since Feb 15, 2021.<br><br>
+      <strong>Penalty for no FASTag:</strong> Double the applicable toll fee is charged at the booth.<br>
+      <span class="edu-law">Max Speed at Toll: 20 KM/H \u00b7 FASTag: Mandatory</span>
+    `;
+    tipEl.textContent = 'When you see the \u26a0 TOLL PLAZA AHEAD warning, start braking early with \u2193. Slow down below 20 KM/H before reaching the yellow stop line. The barrier will lift once you pass at a safe speed.';
+  }
+
+  overlay.classList.add('visible');
+  spawnExplosion(playerGroup.position.x, playerGroup.position.y, playerGroup.position.z);
+}
+
+// Educational overlay continue button
+document.getElementById('edu-continue-btn')?.addEventListener('click', () => {
+  document.getElementById('educational-overlay')?.classList.remove('visible');
+  restartGame();
+});
+
+// ═══════════════════════════════════════════
 //  MAP DATA LOADER
 // ═══════════════════════════════════════════
 async function loadMapData() {
@@ -1107,7 +1385,30 @@ async function loadMapData() {
     namedElements.forEach(n => { if (n.lat > startLat) startLat = n.lat; });
     if (startLat === 0) startLat = 10.535;
 
-    const LAT_TO_GAME_DISTANCE = 50000;
+    // Inject comprehensive list of major NH544 POIs
+    const manualPOIs = [
+      { lat: 10.424, name: 'Pudukkad' },
+      { lat: 10.301, name: 'Chalakudy' },
+      { lat: 10.267, name: 'Koratty' },
+      { lat: 10.196, name: 'Angamaly' },
+      { lat: 10.155, name: 'Nedumbassery Airport' },
+      { lat: 10.108, name: 'Aluva Bridge' },
+      { lat: 10.050, name: 'Kalamassery' },
+      { lat: 10.025, name: 'Edappally Lulu Mall' },
+      { lat: 10.003, name: 'Palarivattom' },
+      { lat: 9.992, name: 'Kaloor' },
+      { lat: 9.970, name: 'Ernakulam South' }
+    ];
+
+    manualPOIs.forEach(poi => {
+      namedElements.push({
+        lat: poi.lat,
+        lon: 76.35, // visual dummy
+        tags: { name: poi.name, junction: 'yes' }
+      });
+    });
+
+    const LAT_TO_GAME_DISTANCE = 10000;
 
     S.waypoints = namedElements
       .map(point => {
@@ -1118,18 +1419,73 @@ async function loadMapData() {
           lon: point.lon,
           name: point.tags.name,
           isToll: point.tags.barrier === 'toll_booth',
+          isJunction: point.tags.junction === 'yes',
           triggerDistance: Math.max(0, gameDistance),
-          spawned: false
+          spawned: false,
+          pinEl: null
         };
       })
       .sort((a, b) => a.triggerDistance - b.triggerDistance);
 
-    console.log(`🗺️ Map Loaded! ${S.waypoints.length} named POIs. Start: Thrissur → End: Ernakulam`);
+    // Deduplicate waypoints that are very close together
+    const deduped = [];
+    S.waypoints.forEach(wp => {
+      const last = deduped[deduped.length - 1];
+      if (!last || Math.abs(wp.triggerDistance - last.triggerDistance) > 150) {
+        deduped.push(wp);
+      }
+    });
+    S.waypoints = deduped;
+
+    // Compute total journey distance for the progress bar
+    if (S.waypoints.length > 0) {
+      S.totalJourneyDistance = S.waypoints[S.waypoints.length - 1].triggerDistance + 500;
+    }
+
+    // Create journey progress bar pins from real map data
+    createJourneyPins();
+
+    console.log(`🗺️ Map Loaded! ${S.waypoints.length} named POIs. Journey: ${S.totalJourneyDistance.toFixed(0)} units`);
     S.waypoints.forEach(w => console.log(`  ${w.triggerDistance.toFixed(0)}: ${w.name}${w.isToll ? ' (toll)' : ''}`));
   } catch (err) {
     console.error('Failed to load map data.', err);
   }
 }
+
+function createJourneyPins() {
+  const bar = document.getElementById('journey-bar');
+  if (!bar || S.totalJourneyDistance <= 0) return;
+
+  let labelIndex = 0;
+  S.waypoints.forEach(wp => {
+    const pct = (wp.triggerDistance / S.totalJourneyDistance) * 100;
+    const pin = document.createElement('div');
+    pin.className = 'journey-pin';
+    pin.style.left = pct + '%';
+
+    const dot = document.createElement('div');
+    dot.className = 'journey-pin-dot' + (wp.isToll ? ' toll' : '');
+    pin.appendChild(dot);
+
+    const label = document.createElement('div');
+    label.className = 'journey-pin-label' + (wp.isToll ? ' toll' : '');
+    let shortName = wp.name
+      .replace(' Junction', ' Jct')
+      .replace(', National Highway 47', '')
+      .replace(' National Highway 47', '');
+    if (shortName.length > 18) shortName = shortName.substring(0, 16) + '…';
+    label.textContent = shortName;
+    if (labelIndex % 2 === 1) {
+      label.style.marginTop = '14px';
+    }
+    labelIndex++;
+    pin.appendChild(label);
+
+    bar.appendChild(pin);
+    wp.pinEl = dot;
+  });
+}
+
 loadMapData();
 
 // ═══════════════════════════════════════════
@@ -1202,12 +1558,74 @@ function createDirectionBoard(x, z, text) {
 }
 
 // ═══════════════════════════════════════════
+//  TOLL BOOTH SPAWNER
+// ═══════════════════════════════════════════
+function spawnTollBooth(waypoint) {
+  console.log(`🛣️ Approaching Toll: ${waypoint.name}`);
+  
+  const boothMesh = createTollBooth(waypoint.name);
+  boothMesh.position.set(0, 0, -150);
+  boothMesh.userData.baseX = boothMesh.position.x;
+  scene.add(boothMesh);
+
+  // Stop line for the toll
+  const stopLineMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(ROAD.totalWidth, 1.5),
+    new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.6, side: THREE.DoubleSide })
+  );
+  stopLineMesh.rotation.x = -Math.PI / 2;
+  stopLineMesh.position.set(0, 0.05, -150);
+  stopLineMesh.userData.baseX = stopLineMesh.position.x;
+  scene.add(stopLineMesh);
+
+  // Speed limit sign before the toll
+  const speedSign = createSpeedSign(-ROAD.halfWidth - 3, -130, 20);
+  speedSign.userData.baseX = speedSign.position.x;
+  scene.add(speedSign);
+
+  S.activeTollBooth = {
+    waypointData: waypoint,
+    boothMesh: boothMesh,
+    stopLineMesh: stopLineMesh,
+    speedSign: speedSign,
+    prevZ: -150,
+    passed: false
+  };
+
+  const tollWarn = document.getElementById('toll-warning');
+  if (tollWarn) tollWarn.classList.add('visible');
+  showPopup(`💰 ${waypoint.name} — FASTag Lane Open`, 'savari-popup');
+}
+
+// ═══════════════════════════════════════════
 //  TRAFFIC JUNCTION SPAWNER
 // ═══════════════════════════════════════════
 function spawnEducationalJunction(waypoint) {
   console.log(`🚦 Approaching: ${waypoint.name}`);
 
-  showPopup(`🚦 ${waypoint.name} — STOP AT LINE`, 'savari-popup dropoff');
+  // Clean any existing junction first
+  cleanupActiveJunction();
+
+  showPopup(`🚦 ${waypoint.name} — STOP AT RED`, 'savari-popup dropoff');
+
+  // ── Perpendicular Cross-Road (4-way junction) ──
+  const crossGeo = new THREE.PlaneGeometry(80, ROAD.totalWidth);
+  const crossMat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.9 });
+  const crossRoad = new THREE.Mesh(crossGeo, crossMat);
+  crossRoad.rotation.x = -Math.PI / 2;
+  crossRoad.position.set(0, -0.005, -160);
+  crossRoad.userData.baseX = crossRoad.position.x;
+  scene.add(crossRoad);
+  S.activeJunctionAssets.push(crossRoad);
+
+  // Spawn Cross Traffic Bus
+  const bus = createKSRTCBus(false); // Using existing bus factory
+  bus.position.set(30, 0.4, -160); // Starts from right
+  bus.rotation.y = -Math.PI / 2; // Facing left
+  bus.userData = { baseX: bus.position.x, speed: -0.15, active: true }; // Moves along X axis
+  scene.add(bus);
+  S.crossTraffic.push(bus);
+  S.activeJunctionAssets.push(bus); // For automatic cleanup
 
   // Glowing red stop line
   const lineGeo = new THREE.PlaneGeometry(ROAD.totalWidth, 2.5);
@@ -1220,6 +1638,7 @@ function spawnEducationalJunction(waypoint) {
   const stopLine = new THREE.Mesh(lineGeo, lineMat);
   stopLine.rotation.x = -Math.PI / 2;
   stopLine.position.set(0, 0.05, -150);
+  stopLine.userData.baseX = stopLine.position.x;
   scene.add(stopLine);
 
   // White border on stop line
@@ -1227,14 +1646,16 @@ function spawnEducationalJunction(waypoint) {
   const border = new THREE.Mesh(new THREE.PlaneGeometry(ROAD.totalWidth + 0.5, 0.15), borderMat);
   border.rotation.x = -Math.PI / 2;
   border.position.set(0, 0.055, -150);
+  border.userData.baseX = border.position.x;
   scene.add(border);
-  S.roadMarkings.push(border);
+  S.activeJunctionAssets.push(border);
 
-  // 3D signal poles on both sides
+  // 3D signal poles — ALWAYS RED at educational junctions so the player sees reality
   [-1, 1].forEach(side => {
-    const sig = createTrafficSignal(side * (ROAD.halfWidth + 2.5), -150);
-    scene.add(sig);
-    S.roadMarkings.push(sig);
+    const sig = createTrafficSignal(side * (ROAD.halfWidth + 2.5), -150, 'red');
+    sig.userData.baseX = sig.position.x;
+  scene.add(sig);
+    S.activeJunctionAssets.push(sig);
   });
 
   // Zebra crosswalk stripes
@@ -1245,9 +1666,36 @@ function spawnEducationalJunction(waypoint) {
     );
     stripe.rotation.x = -Math.PI / 2;
     stripe.position.set(x, 0.01, -147.5);
-    scene.add(stripe);
-    S.roadMarkings.push(stripe);
+    stripe.userData.baseX = stripe.position.x;
+  scene.add(stripe);
+    S.activeJunctionAssets.push(stripe);
   }
+
+  // Junction name board — tells the player exactly WHERE they are
+  const nameCanvas = document.createElement('canvas');
+  nameCanvas.width = 512; nameCanvas.height = 128;
+  const nCtx = nameCanvas.getContext('2d');
+  nCtx.fillStyle = '#1a4a1a';
+  nCtx.fillRect(0, 0, 512, 128);
+  nCtx.strokeStyle = '#ffffff';
+  nCtx.lineWidth = 4;
+  nCtx.strokeRect(4, 4, 504, 120);
+  nCtx.font = 'bold 38px Arial';
+  nCtx.fillStyle = '#ffffff';
+  nCtx.textAlign = 'center';
+  nCtx.textBaseline = 'middle';
+  nCtx.fillText(waypoint.name, 256, 42);
+  nCtx.font = '20px Arial';
+  nCtx.fillStyle = '#ffcc00';
+  nCtx.fillText('🛑 STOP AT RED SIGNAL', 256, 85);
+
+  const nameTexture = new THREE.CanvasTexture(nameCanvas);
+  const nameBoardMat = new THREE.MeshBasicMaterial({ map: nameTexture, side: THREE.DoubleSide });
+  const nameBoard = new THREE.Mesh(new THREE.PlaneGeometry(4, 1), nameBoardMat);
+  nameBoard.position.set(0, 6, -155);
+  nameBoard.userData.baseX = nameBoard.position.x;
+  scene.add(nameBoard);
+  S.activeJunctionAssets.push(nameBoard);
 
   // Show junction timer
   const timerEl = document.getElementById('junction-timer');
@@ -1268,7 +1716,8 @@ function spawnEducationalJunction(waypoint) {
     waypointData: waypoint,
     timerEl: timerEl,
     timerFill: fillEl,
-    stopEl: stopEl
+    stopEl: stopEl,
+    prevZ: -150
   };
 }
 
@@ -1277,6 +1726,7 @@ function spawnEducationalJunction(waypoint) {
 // ═══════════════════════════════════════════
 function startGame() {
   S.started = true;
+  document.body.classList.add('game-active');
   DOM.startScreen.classList.add('hidden');
   scene.background = new THREE.Color(ZONES[0].skyTop);
 
@@ -1294,6 +1744,7 @@ function startGame() {
 function gameOver(hitType = 'traffic') {
   if (S.over) return;
   S.over = true;
+  document.body.classList.remove('game-active');
   DOM.gameOverZone.textContent = ZONES[S.currentZone].name;
   DOM.gameOverScore.textContent = S.score;
   DOM.flyingIndicator.classList.remove('visible');
@@ -1362,13 +1813,27 @@ function restartGame() {
   S.particles.forEach(p => { scene.remove(p.mesh); disposeObject(p.mesh); });
   S.particles.length = 0;
 
-  if (S.activeTrafficLight) {
-    scene.remove(S.activeTrafficLight.mesh);
-    disposeObject(S.activeTrafficLight.mesh);
-    if (S.activeTrafficLight.timerEl) S.activeTrafficLight.timerEl.style.display = 'none';
-    if (S.activeTrafficLight.stopEl) S.activeTrafficLight.stopEl.classList.remove('visible');
-    S.activeTrafficLight = null;
+  cleanupActiveJunction();
+  
+  if (S.activeTollBooth) {
+    scene.remove(S.activeTollBooth.boothMesh);
+    scene.remove(S.activeTollBooth.stopLineMesh);
+    scene.remove(S.activeTollBooth.speedSign);
+    disposeObject(S.activeTollBooth.boothMesh);
+    disposeObject(S.activeTollBooth.stopLineMesh);
+    disposeObject(S.activeTollBooth.speedSign);
+    S.activeTollBooth = null;
   }
+  const tollWarn = document.getElementById('toll-warning');
+  if (tollWarn) tollWarn.classList.remove('visible');
+
+  const journeyFill = document.getElementById('journey-fill');
+  const journeyAuto = document.getElementById('journey-auto');
+  if (journeyFill) journeyFill.style.width = '0%';
+  if (journeyAuto) journeyAuto.style.left = '0%';
+  S.waypoints.forEach(wp => {
+    if (wp.pinEl) wp.pinEl.classList.remove('passed');
+  });
 
   Object.assign(S, {
     over: false, score: 0, speed: 0, velocity: 0,
@@ -1455,9 +1920,11 @@ function animate() {
     if (S.distanceTraveled > nextWP.triggerDistance - 150 && !nextWP.spawned) {
       nextWP.spawned = true;
       if (nextWP.isToll) {
-        showPopup('🛑 ' + nextWP.name, 'savari-popup dropoff');
-      } else {
+        spawnTollBooth(nextWP);
+      } else if (nextWP.isJunction) {
         spawnEducationalJunction(nextWP);
+      } else {
+        showPopup('📍 ' + nextWP.name, 'savari-popup dropoff');
       }
     }
     if (S.distanceTraveled > nextWP.triggerDistance + 50) {
@@ -1467,48 +1934,143 @@ function animate() {
 
   // ── TRAFFIC LIGHT LOGIC ──
   if (S.activeTrafficLight) {
-    S.activeTrafficLight.mesh.position.z += S.speed;
+    const currentZ = S.activeTrafficLight.mesh.position.z + S.speed;
+    const prevZ = S.activeTrafficLight.prevZ;
+    S.activeTrafficLight.mesh.position.z = currentZ;
+    S.activeTrafficLight.prevZ = currentZ;
 
     // Compute approach progress (150 → 0 units ahead)
-    const distToStop = -S.activeTrafficLight.mesh.position.z;
+    const distToStop = -currentZ;
     let pct = Math.max(0, Math.min(100, (distToStop / 150) * 100));
     if (S.activeTrafficLight.timerFill) {
       S.activeTrafficLight.timerFill.style.width = pct + '%';
     }
 
-    if (S.activeTrafficLight.mesh.position.z > -2 && S.activeTrafficLight.mesh.position.z < 2) {
-      // Hide timer and stop instruction on arrival
-      if (S.activeTrafficLight.timerEl) S.activeTrafficLight.timerEl.style.display = 'none';
-      if (S.activeTrafficLight.stopEl) S.activeTrafficLight.stopEl.classList.remove('visible');
-
-      if (S.velocity > 0.05) {
-        gameOver('Red Light Violation');
-        const aiRoastEl = document.getElementById('ai-roast');
-        if (aiRoastEl) {
-          aiRoastEl.innerHTML = `
-            <strong style="color:red">AUTO CHETTAN SAYS:</strong><br/>
-            Eda mone! That was a red light at ${S.activeTrafficLight.waypointData.name}! <br/>
-            Jumping a red signal is an offense under Section 119 of the Motor Vehicles Act.
-            Always slow down when approaching junctions!
-          `;
-        }
-        return;
-      } else {
+    // 1. Calibrated Stopping Zone (Stop before the line!)
+    if (S.activeTrafficLight.state === 'red' && currentZ > -30 && currentZ <= 0) {
+      if (S.velocity <= 0.05) {
         showPopup('✅ Good Stop! Light is Green.', 'savari-popup pickup');
         S.activeTrafficLight.state = 'green';
         if (S.activeTrafficLight.stopEl) S.activeTrafficLight.stopEl.classList.remove('visible');
-        scene.remove(S.activeTrafficLight.mesh);
-        disposeObject(S.activeTrafficLight.mesh);
-        S.activeTrafficLight = null;
+        if (S.activeTrafficLight.timerEl) S.activeTrafficLight.timerEl.style.display = 'none';
+        console.log('🔊 SFX: Good stop!');
       }
     }
-    if (S.activeTrafficLight && S.activeTrafficLight.mesh.position.z > 20) {
+
+    // 2. Swept collision: did we cross the line this frame while still RED?
+    if (prevZ <= 0 && currentZ > 0) {
+      // Hide UI when crossing
       if (S.activeTrafficLight.timerEl) S.activeTrafficLight.timerEl.style.display = 'none';
       if (S.activeTrafficLight.stopEl) S.activeTrafficLight.stopEl.classList.remove('visible');
-      scene.remove(S.activeTrafficLight.mesh);
-      disposeObject(S.activeTrafficLight.mesh);
-      S.activeTrafficLight = null;
+
+      if (S.activeTrafficLight.state === 'red') {
+        S.over = true;
+        showEducationalOverlay('red_light', { junctionName: S.activeTrafficLight.waypointData.name });
+        return;
+      }
     }
+
+    // 3. Cleanup after passing the junction completely (allow it to scroll past)
+    if (S.activeTrafficLight && currentZ > 120) {
+      cleanupActiveJunction();
+    }
+  }
+
+  // Scroll active junction assets (poles, zebra crossings, boards, cross-roads)
+  S.activeJunctionAssets.forEach(asset => {
+    // If it's a cross-traffic bus, it moves horizontally and checks collisions
+    if (asset.userData && asset.userData.active !== undefined) {
+      if (asset.userData.active) {
+        asset.userData.baseX += asset.userData.speed;
+        
+        // T-Bone Collision Check (only if player is moving and hasn't stopped properly)
+        if (!S.over && S.speed > 0.1) {
+          if (Math.abs(asset.position.z - playerGroup.position.z) < 2.5 && 
+              Math.abs(asset.userData.baseX - playerGroup.position.x) < 3.5) {
+            console.log('💥 T-BONE COLLISION!');
+            gameOver('Cross Traffic Bus');
+          }
+        }
+      }
+    }
+    asset.position.z += S.speed;
+  });
+
+  // ── TOLL BOOTH LOGIC ──
+  if (S.activeTollBooth) {
+    const currentZ = S.activeTollBooth.stopLineMesh.position.z + S.speed;
+    const prevZ = S.activeTollBooth.prevZ;
+    const speedKMH = Math.floor((S.velocity / S.maxVelocity) * 100);
+    const distToToll = -currentZ;
+    
+    // Scroll components
+    S.activeTollBooth.boothMesh.position.z += S.speed;
+    S.activeTollBooth.stopLineMesh.position.z = currentZ;
+    S.activeTollBooth.speedSign.position.z += S.speed;
+    S.activeTollBooth.prevZ = currentZ;
+
+    // Animate Barrier Arms
+    if (S.activeTollBooth.boothMesh.userData && S.activeTollBooth.boothMesh.userData.barrierArms) {
+      S.activeTollBooth.boothMesh.userData.barrierArms.forEach((armPivot, index) => {
+        // Open FASTag lane (left lane, index 0) if speed is safe. Cash lane (index 1) stays closed.
+        if (index === 0 && speedKMH <= 20 && distToToll < 25 && distToToll > -10) {
+          armPivot.rotation.z = Math.min(armPivot.rotation.z + dt * 4, Math.PI / 2);
+        } else if (distToToll < -10) {
+          // Close after passing
+          armPivot.rotation.z = Math.max(armPivot.rotation.z - dt * 2, 0);
+        }
+      });
+    }
+
+    // Swept collision: crossed the yellow line
+    if (!S.activeTollBooth.passed && prevZ <= 0 && currentZ > 0) {
+      S.activeTollBooth.passed = true;
+      const tollWarn = document.getElementById('toll-warning');
+      if (tollWarn) tollWarn.classList.remove('visible');
+      
+      // Check if player is in the blocked cash lane (right side)
+      if (S.playerX > -1.0) {
+        console.log('💥 CRASH! Hit parked car in Cash Lane.');
+        gameOver('Static Car');
+        return;
+      }
+
+      if (speedKMH > 20) {
+        console.log('💥 CRASH! Smashed into closed toll barrier.');
+        gameOver('Toll Barrier');
+        return;
+      } else {
+        S.score += 200;
+        showPopup('✅ FASTag Scanned! +200', 'savari-popup pickup');
+        console.log('🔊 SFX: Toll scanned successfully!');
+      }
+    }
+
+    if (currentZ > 40) {
+      scene.remove(S.activeTollBooth.boothMesh);
+      scene.remove(S.activeTollBooth.stopLineMesh);
+      scene.remove(S.activeTollBooth.speedSign);
+      disposeObject(S.activeTollBooth.boothMesh);
+      disposeObject(S.activeTollBooth.stopLineMesh);
+      disposeObject(S.activeTollBooth.speedSign);
+      S.activeTollBooth = null;
+    }
+  }
+
+  // ── JOURNEY PROGRESS BAR ──
+  if (S.totalJourneyDistance > 0) {
+    const progressPct = Math.min(100, (S.distanceTraveled / S.totalJourneyDistance) * 100);
+    const journeyFill = document.getElementById('journey-fill');
+    const journeyAuto = document.getElementById('journey-auto');
+    if (journeyFill) journeyFill.style.width = progressPct + '%';
+    if (journeyAuto) journeyAuto.style.left = progressPct + '%';
+
+    // Highlight passed pins
+    S.waypoints.forEach(wp => {
+      if (wp.pinEl && !wp.pinEl.classList.contains('passed') && S.distanceTraveled >= wp.triggerDistance) {
+        wp.pinEl.classList.add('passed');
+      }
+    });
   }
 
   // ── Gear Display ──
@@ -1527,6 +2089,30 @@ function animate() {
 
   // ── Zone ──
   updateZone();
+
+  // ── DYNAMIC LIGHTING & BACKGROUND INTERPOLATION ──
+  let nextZoneIdx = Math.min(S.currentZone + 1, ZONES.length - 1);
+  let startDist = S.currentZone === 0 ? 0 : ZONE_BOUNDARIES[S.currentZone - 1];
+  let endDist = ZONE_BOUNDARIES[S.currentZone] || (startDist + 10000);
+  let progress = Math.max(0, Math.min(1, (S.distanceTraveled - startDist) / (endDist - startDist)));
+  
+  const currentZObj = ZONES[S.currentZone];
+  const nextZObj = ZONES[nextZoneIdx];
+
+  const fogColorStart = new THREE.Color(currentZObj.fogColor);
+  const fogColorEnd = new THREE.Color(nextZObj.fogColor);
+  scene.fog.color.copy(fogColorStart).lerp(fogColorEnd, progress);
+
+  const bgStart = new THREE.Color(currentZObj.skyTop);
+  const bgEnd = new THREE.Color(nextZObj.skyTop);
+  if (!scene.background || !(scene.background instanceof THREE.Color)) {
+    scene.background = new THREE.Color();
+  }
+  scene.background.copy(bgStart).lerp(bgEnd, progress);
+
+  ambientLight.color.copy(fogColorStart).lerp(fogColorEnd, progress);
+  // Ernakulam city gets slightly brighter ambient lighting
+  ambientLight.intensity = 0.55 + (S.currentZone === 5 ? progress * 0.3 : 0);
 
   // ── Player steering ──
   const effectiveSteer = S.hasCustomer ? S.steerSpeed * S.savariSteerPenalty : S.steerSpeed;
@@ -1586,11 +2172,25 @@ function animate() {
 
   for (let i = S.obstacles.length - 1; i >= 0; i--) {
     const obs = S.obstacles[i];
-    const atSignal = S.activeTrafficLight && S.activeTrafficLight.mesh.position.z < 20 && S.activeTrafficLight.mesh.position.z > -5;
-    const effectiveScroll = atSignal ? 0 : S.speed;
-    obs.position.z += effectiveScroll * (1 - (obs.userData.speedMultiplier || 0));
+    
+    // Decoupled NPC velocity fix
+    const npcWorldSpeed = 0.4 * (obs.userData.speedMultiplier || 1);
+    
+    // Traffic-light-aware NPC braking behavior
+    let effectiveNpcSpeed = npcWorldSpeed;
+    if (S.activeTrafficLight && S.activeTrafficLight.state === 'red') {
+      const stopLineZ = S.activeTrafficLight.mesh.position.z;
+      // If NPC is approaching the stop line and is within 30 units, decelerate
+      if (obs.position.z < stopLineZ && Math.abs(stopLineZ - obs.position.z) < 30) {
+        effectiveNpcSpeed = npcWorldSpeed * (Math.abs(stopLineZ - obs.position.z) / 30);
+      }
+    }
+    
+    const relativeMovement = effectiveNpcSpeed - S.speed;
+    obs.position.z -= relativeMovement;
 
-    if (obs.position.z > 18) {
+    // Cull if too far ahead or behind
+    if (obs.position.z > 18 || obs.position.z < -250) {
       scene.remove(obs);
       disposeObject(obs);
       S.obstacles.splice(i, 1);
@@ -1615,9 +2215,12 @@ function animate() {
 
   for (let i = S.oncomingVehicles.length - 1; i >= 0; i--) {
     const v = S.oncomingVehicles[i];
-    v.position.z += S.speed + (v.userData.oncomingSpeed || 0.5);
+    
+    // Decoupled oncoming velocity
+    const oncomingWorldSpeed = v.userData.oncomingSpeed || 0.5;
+    v.position.z += S.speed + oncomingWorldSpeed;
 
-    if (v.position.z > 18) {
+    if (v.position.z > 18 || v.position.z < -250) {
       scene.remove(v);
       disposeObject(v);
       S.oncomingVehicles.splice(i, 1);
@@ -1704,7 +2307,8 @@ function animate() {
       const sign = Math.random() > 0.5
         ? createSpeedSign(side * (ROAD.halfWidth + 3), z, 40 + Math.floor(Math.random() * 30))
         : createDirectionBoard(side * (ROAD.halfWidth + 3), z, '');
-      scene.add(sign);
+      sign.userData.baseX = sign.position.x;
+  scene.add(sign);
       S.roadSigns.push(sign);
     });
   }
@@ -1825,7 +2429,9 @@ function animate() {
   }
 
   // ── Metro pillars scroll ──
+  const showMetro = S.distanceTraveled > 3800;
   S.metroPillars.forEach(p => {
+    p.visible = showMetro;
     p.position.z += S.speed;
     if (p.position.z > 18) p.position.z -= 260;
   });
@@ -1840,6 +2446,11 @@ function animate() {
   S.buildings.forEach(b => {
     b.position.z += S.speed * 0.45;
     if (b.position.z > 22) b.position.z -= 260;
+    
+    // Toggle neon lights in Ernakulam Corridor (Zone 5)
+    if (b.userData && b.userData.isNeon) {
+      b.intensity = S.currentZone === 5 ? 0.8 + Math.sin(Date.now() * 0.01 + b.position.x) * 0.4 : 0;
+    }
   });
   S.palms.forEach(p => {
     p.position.z += S.speed * 0.6;
@@ -1900,6 +2511,71 @@ function animate() {
 
   // ── Headlight flicker ──
   headlightGlow.intensity = 0.4 + Math.sin(Date.now() * 0.003) * 0.08;
+
+  // ── DYNAMIC ENVIRONMENT ──
+  if (S.distanceTraveled > 4280 && S.distanceTraveled < 4400) {
+    if (!S.onBridge) {
+      S.onBridge = true;
+      S.roadMarkings.forEach(rm => {
+        if (rm.userData && rm.userData.isRoadSegment) {
+          rm.material.color.setHex(0x555555); // Concrete bridge
+        } else if (rm.geometry.type === 'PlaneGeometry' && rm.geometry.parameters.width === 120) {
+          rm.material.color.setHex(0x1a4d80); // River
+        }
+      });
+    }
+  } else if (S.onBridge) {
+    S.onBridge = false;
+    S.roadMarkings.forEach(rm => {
+      if (rm.userData && rm.userData.isRoadSegment) {
+        rm.material.color.setHex(0x1a1a1a);
+      } else if (rm.geometry.type === 'PlaneGeometry' && rm.geometry.parameters.width === 120) {
+        rm.material.color.setHex(ZONES[S.currentZone].groundColor);
+      }
+    });
+  }
+
+  // ── ARCADE CURVATURE SHIFT ──
+  // Do not curve inside toll plazas or junctions where exact straight driving is required
+  const inTollPlaza = S.activeTollBooth !== null;
+  const inJunction = S.activeTrafficLight !== null && S.activeTrafficLight.mesh.position.z > -100 && S.activeTrafficLight.mesh.position.z < 20;
+  
+  if (!inTollPlaza && !inJunction) {
+    const curvePhase = S.distanceTraveled * 0.0015;
+    const amplitude = 4.5;
+    const freq = 0.01;
+    
+    const applyCurve = (obj) => {
+      if (obj && obj.userData && obj.userData.baseX !== undefined) {
+        obj.position.x = obj.userData.baseX + Math.sin(curvePhase - obj.position.z * freq) * amplitude;
+        
+        // Fix "broken steps" by yawing long segment meshes (like curbs, dashes, road planes)
+        if (obj.userData.isLongSegment) {
+          const dx_dz = -amplitude * freq * Math.cos(curvePhase - obj.position.z * freq);
+          const yaw = Math.atan(dx_dz);
+          
+          if (obj.geometry && obj.geometry.type === 'PlaneGeometry') {
+            obj.rotation.z = yaw;
+          } else {
+            obj.rotation.y = yaw;
+          }
+        }
+      }
+    };
+    S.obstacles.forEach(applyCurve);
+    S.oncomingVehicles.forEach(applyCurve);
+    S.coins.forEach(applyCurve);
+    S.potholes.forEach(applyCurve);
+    S.roadSigns.forEach(applyCurve);
+    S.pickupZones.forEach(applyCurve);
+    S.dropoffZones.forEach(applyCurve);
+    S.metroPillars.forEach(applyCurve);
+    S.roadMarkings.forEach(applyCurve);
+    S.buildings.forEach(applyCurve);
+    S.palms.forEach(applyCurve);
+    S.activeJunctionAssets.forEach(applyCurve);
+    streetLights.forEach(applyCurve);
+  }
 
   // ── Minimap ──
   const minimap = document.getElementById('minimap');

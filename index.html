@@ -48,6 +48,14 @@
     </div>
   </div>
 
+  <!-- ══ Journey Progress Bar ══ -->
+  <div id="journey-progress">
+    <div id="journey-bar">
+      <div id="journey-fill"></div>
+      <div id="journey-auto">🛺</div>
+    </div>
+  </div>
+
   <!-- ══ Customer Status ══ -->
   <div id="savari-status">
     <span class="savari-icon">🧑</span>
@@ -60,6 +68,12 @@
 
   <!-- ══ Oncoming Traffic Warning ══ -->
   <div id="oncoming-warning">⚠ Wrong Side — Oncoming Traffic!</div>
+
+  <!-- ══ Toll Booth Warning ══ -->
+  <div id="toll-warning">
+    <div class="toll-title">⚠ TOLL PLAZA AHEAD ⚠</div>
+    <div class="toll-instruction">Slow down to 20 KM/H or below · FASTag mandatory</div>
+  </div>
 
   <!-- ══ Boost Bar ══ -->
   <div id="boost-container">
@@ -95,6 +109,16 @@
     <div class="gameover-restart">Click or Press ENTER to Retry</div>
   </div>
 
+  <!-- ══ Educational Overlay ══ -->
+  <div id="educational-overlay">
+    <div class="edu-icon" id="edu-icon">🚦</div>
+    <div class="edu-title" id="edu-violation-title">TRAFFIC VIOLATION</div>
+    <div class="edu-location" id="edu-violation-location"></div>
+    <div class="edu-section" id="edu-violation-details"></div>
+    <div class="edu-tip" id="edu-violation-tip"></div>
+    <div class="edu-continue" id="edu-continue-btn">CONTINUE → RETRY</div>
+  </div>
+
   <!-- ══ Junction Timer ══ -->
   <div id="junction-timer" style="display:none;position:fixed;bottom:120px;left:50%;transform:translateX(-50%);text-align:center;pointer-events:none;z-index:20;">
     <div id="junction-timer-name" style="font-family:'Teko',sans-serif;font-size:22px;color:#ff4444;text-shadow:0 0 15px rgba(255,0,0,0.9);"></div>
@@ -104,15 +128,21 @@
   </div>
 
   <!-- ══ Stop Instruction ══ -->
-  <div id="stop-instruction" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-family:'Teko',sans-serif;font-size:72px;color:#ff0000;text-shadow:0 0 40px rgba(255,0,0,0.8),0 0 80px rgba(255,0,0,0.4);pointer-events:none;z-index:25;animation:pulse 0.8s infinite;text-align:center;line-height:1;">
+  <div id="stop-instruction" style="display:none;position:fixed;top:15%;left:50%;transform:translate(-50%,-50%);font-family:'Teko',sans-serif;font-size:72px;color:#ff0000;text-shadow:0 0 40px rgba(255,0,0,0.8),0 0 80px rgba(255,0,0,0.4);pointer-events:none;z-index:25;animation:pulse 0.8s infinite;text-align:center;line-height:1;">
     🛑<br><span style="font-size:36px;">PRESS ↓ TO STOP</span>
   </div>
 
   <!-- ══ Mobile Controls ══ -->
   <div id="mobile-controls">
-    <div class="mobile-btn" id="mobile-left">◀</div>
+    <div class="mobile-btn-group left-group">
+      <div class="mobile-btn" id="mobile-left">◀</div>
+      <div class="mobile-btn" id="mobile-right">▶</div>
+    </div>
     <div class="mobile-btn" id="mobile-boost">BOOST</div>
-    <div class="mobile-btn" id="mobile-right">▶</div>
+    <div class="mobile-btn-group right-group">
+      <div class="mobile-btn" id="mobile-up">▲</div>
+      <div class="mobile-btn" id="mobile-down">▼</div>
+    </div>
   </div>
 
   <!-- ══ Engine ══ -->
