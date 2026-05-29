@@ -55,6 +55,9 @@ const S = {
   gearCeil: [0, 0.30, 0.55, 0.78, 1.0],
   gearChangeCooldown: 0,
   junctionApproachDist: null,
+  curveAmplitudeCurrent: 2.0,
+  curveAmplitudeTarget: 2.0,
+  gridlockTimeoutId: null,
 
   playerX: -3.5,
   playerTargetX: -3.5,
@@ -382,6 +385,8 @@ function createTrafficSignal(x, z, forceState) {
   g.add(box);
 
   // Lights (red, yellow, green) — only one active
+  g.userData.isTrafficSignal = true;
+  g.userData.lightMeshes = [];
   const lightStates = ['red', 'yellow', 'green'];
   const active = forceState || lightStates[Math.floor(Math.random() * 3)];
   const lightColors = { red: 0xff2200, yellow: 0xffcc00, green: 0x22dd44 };
@@ -392,6 +397,7 @@ function createTrafficSignal(x, z, forceState) {
     const l = new THREE.Mesh(lGeo, lMat);
     l.position.set(0, y, 0.14);
     g.add(l);
+    g.userData.lightMeshes.push(l);
   });
 
   // Small glow for active light
@@ -482,7 +488,7 @@ function createTollBooth(waypointName) {
 
     // If it's the right-most player lane, block it with a static car to force FASTag lane usage
     if (index === 1) {
-      const blockedCar = createObstacleMesh();
+      const blockedCar = createSmallVehicle(false);
       blockedCar.position.set(laneX, 0, 3);
       g.add(blockedCar);
       
@@ -1178,7 +1184,7 @@ function spawnCoin() {
 }
 
 function spawnPothole() {
-  if (S.currentZone !== 3) return; // NH 544 only
+  if (S.currentZone !== 2 && S.currentZone !== 3) return; // NH 544 stretches (Chalakudy-Angamaly)
   const x = ROAD.playerLanes[Math.floor(Math.random() * ROAD.playerLanes.length)] + (Math.random() - 0.5) * 2;
   const ph = createPothole();
   ph.position.set(x, -0.04, -95 - Math.random() * 30);
@@ -1517,7 +1523,7 @@ function createSpeedSign(x, z, limit) {
   const texture = new THREE.CanvasTexture(canvas);
   const signMat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
   const sign = new THREE.Mesh(new THREE.CircleGeometry(0.7, 16), signMat);
-  sign.position.set(0, 3.0, 0);
+  sign.position.set(0, 3.0, 0.15);
   g.add(sign);
 
   g.position.set(x, 0, z);
@@ -1549,7 +1555,7 @@ function createDirectionBoard(x, z, text) {
   const texture = new THREE.CanvasTexture(canvas);
   const boardMat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
   const board = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.7), boardMat);
-  board.position.set(0, 3.2, 0);
+  board.position.set(0, 3.2, 0.15);
   g.add(board);
 
   g.position.set(x, 0, z);
@@ -1722,6 +1728,63 @@ function spawnEducationalJunction(waypoint) {
 }
 
 // ═══════════════════════════════════════════
+//  ZONE-BASED REVIEWS & HIGH SCORE MESSAGES
+// ═══════════════════════════════════════════
+const ZONE_REVIEWS = [
+  // Zone 0: Thrissur City
+  [
+    "Thrissur Pooram traffic-il thanne stuck aayi! 🐘",
+    "Swaraj Round porum idichille... auto-de avastha! 🛺",
+    "Thrissur city limit polum kadannilla mone! 😤",
+    "Round-il oru round poyi... athum mathi ennu thonni? 🔄",
+  ],
+  // Zone 1: Paliyekkara Toll
+  [
+    "Toll adikkathe speed-il poyi! Toll uncle crying 😢",
+    "FASTag illa, speed illa, sense illa — full combo! 💀",
+    "Toll booth kaanumbol brake adikku mone! Basic! 🚧",
+    "Paliyekkara-yil record speed — but wrong record! 🏎️",
+  ],
+  // Zone 2: Chalakudy & Koratty
+  [
+    "Chalakudy road-le pothole kandilla? Kannu thurann odi! 👀",
+    "Koratty junction-il signal break cheytho? Old style! 🚦",
+    "Highway cruising ennu parayumbol crash cheyyaruth! 🛣️",
+    "Chalakudy river polum kaanaathe poyi — slow down! 🌊",
+  ],
+  // Zone 3: Angamaly & Aluva
+  [
+    "Airport kaanam ennu vech ee speed venda mone! ✈️",
+    "Angamaly flyover ethaan nokkiyo? Nee auto-yil alla! 🛺",
+    "Aluva bridge-il ninn view kaanam... but not like this! 🌉",
+    "Angamaly junction-il signal kaanilla? Undo mone! 🚦",
+  ],
+  // Zone 4: Kalamassery
+  [
+    "CUSAT students polum better driving cheyyum! 📚",
+    "Kalamassery metro pillar-il idicho? Metro varum, auto varilla! 🚇",
+    "Industrial area-yil accident — factory workers laughing! 🏭",
+    "InfoPark techies polum ithra crash cheyyilla! 💻",
+  ],
+  // Zone 5: Ernakulam City
+  [
+    "Ernakulam almost ethiyo... ALMOST! So close mone! 😭",
+    "MG Road kaanum mumbe crash — classic tourist move! 🗺️",
+    "Lulu Mall kaanam ennu vech ethra speed venam! 🛍️",
+    "Marine Drive ethaan patilla — auto disaster aanu nee! 🌊",
+  ],
+];
+
+const HIGHSCORE_REVIEWS = [
+  "Adipoli mone! New record! Auto Chettan approved! 🏆",
+  "Pwoli driving! NH544-le puthan record! 🥇",
+  "Superb! Ithrem nannaayi auto odikkunna aareyum kandittilla! 🌟",
+  "Record broken! Chettan-de auto-yil GPS track cheythu! 📍",
+  "Kidu! Oru auto rickshaw-inu ithrem possible ennu ariyilla! 🛺",
+  "Mass! Thrissur to Ernakulam — nee king aada! 👑",
+];
+
+// ═══════════════════════════════════════════
 //  GAME LIFECYCLE
 // ═══════════════════════════════════════════
 function startGame() {
@@ -1754,7 +1817,8 @@ function gameOver(hitType = 'traffic') {
   DOM.savariStatus.classList.remove('active');
   DOM.multBadge.classList.remove('active');
 
-  if (S.score > S.highScore) {
+  const isNewHighScore = S.score > S.highScore;
+  if (isNewHighScore) {
     S.highScore = S.score;
     localStorage.setItem('savariHS', S.highScore);
     DOM.gameOverHS.textContent = '★ New High Score! ★';
@@ -1766,33 +1830,46 @@ function gameOver(hitType = 'traffic') {
   spawnExplosion(playerGroup.position.x, playerGroup.position.y, playerGroup.position.z);
   console.log('🔊 SFX: Crash!');
 
-  // AI Roast Integration
+  // AI Review — Custom zone reviews for normal deaths, Gemini API for new high scores only
   const aiRoastEl = document.getElementById('ai-roast');
   if (aiRoastEl) {
-    aiRoastEl.textContent = 'Auto Chettan is typing...';
+    if (isNewHighScore) {
+      // Gemini API only for new high scores — celebratory review
+      aiRoastEl.textContent = '🏆 Auto Chettan is impressed...';
+      fetch(AI_ROAST_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: `You are "Auto Chettan", a warm and witty Kerala auto-rickshaw driver from Kochi. A player just set a NEW HIGH SCORE of ${S.score} points in "Savari Gemini", a driving game on the Thrissur-Ernakulam NH544 route. They reached ${ZONES[S.currentZone].name}.
 
-    fetch(AI_ROAST_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: `Act as a highly sarcastic Kochi auto driver. The player scored ${S.score} and crashed into a ${hitType} in ${ZONES[S.currentZone].name}. Give me ONE short, ruthless insult in Manglish. No quotes, no markdown, under 15 words.`
+Write ONE short celebratory one-liner (8-12 words). Mix English with 1-2 Malayalam/Manglish words naturally. Be proud, not sarcastic.
+
+Examples of tone: "Pwoli mone! Ernakulam vare ethiyo, adipoli driving!", "Mass record! NH544-le king nee thanne!", "Kidu! Auto Chettan-de salute undu mone!"
+
+Reply with ONLY the one-liner, nothing else.`
+            }]
           }]
-        }]
+        })
       })
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data.candidates && data.candidates[0].content.parts[0].text) {
-          aiRoastEl.textContent = data.candidates[0].content.parts[0].text;
-        } else {
-          aiRoastEl.textContent = 'Eda mone, driving padichittu vaa!';
-        }
-      })
-      .catch(() => {
-        aiRoastEl.textContent = 'Eda mone, driving padichittu vaa!';
-      });
+        .then(res => res.json())
+        .then(data => {
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text && text.length > 3 && text.length < 100) {
+            aiRoastEl.textContent = '🏆 ' + text.trim();
+          } else {
+            aiRoastEl.textContent = '🏆 ' + HIGHSCORE_REVIEWS[Math.floor(Math.random() * HIGHSCORE_REVIEWS.length)];
+          }
+        })
+        .catch(() => {
+          aiRoastEl.textContent = '🏆 ' + HIGHSCORE_REVIEWS[Math.floor(Math.random() * HIGHSCORE_REVIEWS.length)];
+        });
+    } else {
+      // Custom zone-based review — no API call
+      const zoneReviews = ZONE_REVIEWS[S.currentZone] || ZONE_REVIEWS[0];
+      aiRoastEl.textContent = zoneReviews[Math.floor(Math.random() * zoneReviews.length)];
+    }
   }
 }
 
@@ -1810,10 +1887,15 @@ function restartGame() {
   clearArray(S.dropoffZones);
   clearArray(S.gridlockWalls);
   clearArray(S.roadSigns);
+  S.crossTraffic.length = 0;
   S.particles.forEach(p => { scene.remove(p.mesh); disposeObject(p.mesh); });
   S.particles.length = 0;
 
   cleanupActiveJunction();
+  if (S.gridlockTimeoutId) {
+    clearTimeout(S.gridlockTimeoutId);
+    S.gridlockTimeoutId = null;
+  }
   
   if (S.activeTollBooth) {
     scene.remove(S.activeTollBooth.boothMesh);
@@ -1847,6 +1929,7 @@ function restartGame() {
     potholeTimer: 0, signTimer: 0, savariPickupTimer: 0,
     distanceTraveled: 0, currentZone: 0,
     nextWaypointIndex: 0, gear: 1, gearChangeCooldown: 0, junctionApproachDist: null,
+    curveAmplitudeCurrent: 2.0, curveAmplitudeTarget: 2.0, gridlockTimeoutId: null,
   });
 
   const jTimer = document.getElementById('junction-timer');
@@ -1866,7 +1949,14 @@ function restartGame() {
   DOM.multBadge.classList.remove('active');
   scene.fog.color.set(ZONES[0].fogColor);
   scene.background = new THREE.Color(ZONES[0].skyTop);
-  ground.material.color.set(ZONES[0].groundColor);
+  S.roadMarkings.forEach(rm => {
+    if (rm.userData?.isLongSegment && rm.geometry?.parameters?.width === 120) {
+      rm.material.color.setHex(ZONES[0].groundColor);
+    }
+    if (rm.userData?.isRoadSegment) {
+      rm.material.color.setHex(0x1a1a1a);
+    }
+  });
   waterMat.opacity = 0.3;
 
   for (let i = 0; i < 4; i++) spawnSameDirectionObstacle();
@@ -1941,7 +2031,7 @@ function animate() {
 
     // Compute approach progress (150 → 0 units ahead)
     const distToStop = -currentZ;
-    let pct = Math.max(0, Math.min(100, (distToStop / 150) * 100));
+    let pct = Math.max(0, Math.min(100, (1 - distToStop / 150) * 100));
     if (S.activeTrafficLight.timerFill) {
       S.activeTrafficLight.timerFill.style.width = pct + '%';
     }
@@ -1949,11 +2039,24 @@ function animate() {
     // 1. Calibrated Stopping Zone (Stop before the line!)
     if (S.activeTrafficLight.state === 'red' && currentZ > -30 && currentZ <= 0) {
       if (S.velocity <= 0.05) {
-        showPopup('✅ Good Stop! Light is Green.', 'savari-popup pickup');
+        showPopup('✅ Good Stop! Light is Green — GO!', 'savari-popup pickup');
         S.activeTrafficLight.state = 'green';
         if (S.activeTrafficLight.stopEl) S.activeTrafficLight.stopEl.classList.remove('visible');
         if (S.activeTrafficLight.timerEl) S.activeTrafficLight.timerEl.style.display = 'none';
-        console.log('🔊 SFX: Good stop!');
+        // Update 3D traffic signal visuals to green
+        S.activeJunctionAssets.forEach(asset => {
+          if (asset.userData?.isTrafficSignal && asset.userData.lightMeshes) {
+            asset.userData.lightMeshes[0].material.color.setHex(0x111111); // red off
+            asset.userData.lightMeshes[1].material.color.setHex(0x111111); // yellow off
+            asset.userData.lightMeshes[2].material.color.setHex(0x22dd44); // green on
+          }
+        });
+        // Change stop line to green
+        S.activeTrafficLight.mesh.material.color.setHex(0x22dd44);
+        S.activeTrafficLight.mesh.material.opacity = 0.5;
+        // Stop cross traffic
+        S.crossTraffic.forEach(ct => { if (ct.userData) ct.userData.active = false; });
+        console.log('🔊 SFX: Good stop! Signal is GREEN.');
       }
     }
 
@@ -1982,6 +2085,11 @@ function animate() {
     if (asset.userData && asset.userData.active !== undefined) {
       if (asset.userData.active) {
         asset.userData.baseX += asset.userData.speed;
+        // Deactivate when far off-screen
+        if (asset.userData.baseX < -50 || asset.userData.baseX > 50) {
+          asset.userData.active = false;
+          asset.visible = false;
+        }
         
         // T-Bone Collision Check (only if player is moving and hasn't stopped properly)
         if (!S.over && S.speed > 0.1) {
@@ -2116,19 +2224,20 @@ function animate() {
 
   // ── Player steering ──
   const effectiveSteer = S.hasCustomer ? S.steerSpeed * S.savariSteerPenalty : S.steerSpeed;
+  const steerDelta = Math.max(effectiveSteer * S.speed * 3, 0.04);
   if (keys['ArrowLeft'] || keys['KeyA']) {
-    S.playerTargetX = Math.max(S.playerTargetX - effectiveSteer * S.speed * 3, ROAD.boundaryLeft);
+    S.playerTargetX = Math.max(S.playerTargetX - steerDelta, ROAD.boundaryLeft);
   }
   if (keys['ArrowRight'] || keys['KeyD']) {
-    S.playerTargetX = Math.min(S.playerTargetX + effectiveSteer * S.speed * 3, ROAD.boundaryRight);
+    S.playerTargetX = Math.min(S.playerTargetX + steerDelta, ROAD.boundaryRight);
   }
-  S.playerX += (S.playerTargetX - S.playerX) * 0.12;
+  S.playerX += (S.playerTargetX - S.playerX) * 0.18;
   playerGroup.position.x = S.playerX;
 
   // Tilt
-  const steerDelta = S.playerTargetX - S.playerX;
-  playerGroup.rotation.z = -steerDelta * 0.12;
-  playerGroup.rotation.y = -steerDelta * 0.025;
+  const tiltDelta = S.playerTargetX - S.playerX;
+  playerGroup.rotation.z = -tiltDelta * 0.12;
+  playerGroup.rotation.y = -tiltDelta * 0.025;
 
   // ── Oncoming traffic warning ──
   const onWrongSide = S.playerX > ROAD.medianX + ROAD.medianWidth / 2;
@@ -2302,11 +2411,21 @@ function animate() {
   S.signTimer += dt;
   if (S.signTimer > 4.0) {
     S.signTimer = 0;
+    const validSpeeds = [30, 40, 50, 60, 80];
+    const zoneDirections = [
+      ['Thrissur ←', 'Ernakulam →', 'NH 544'],
+      ['Paliyekkara Toll', 'Chalakudy 25km', 'NH 544'],
+      ['Chalakudy ←', 'Angamaly 40km', 'Koratty →'],
+      ['Angamaly ←', 'Aluva 12km', 'Airport 8km'],
+      ['Kalamassery ←', 'Ernakulam 6km', 'CUSAT →'],
+      ['Ernakulam City', 'MG Road 2km', 'Marine Drive →'],
+    ];
     [-1, 1].forEach(side => {
       const z = -140 - Math.random() * 100;
+      const dirs = zoneDirections[S.currentZone] || zoneDirections[0];
       const sign = Math.random() > 0.5
-        ? createSpeedSign(side * (ROAD.halfWidth + 3), z, 40 + Math.floor(Math.random() * 30))
-        : createDirectionBoard(side * (ROAD.halfWidth + 3), z, '');
+        ? createSpeedSign(side * (ROAD.halfWidth + 3), z, validSpeeds[Math.floor(Math.random() * validSpeeds.length)])
+        : createDirectionBoard(side * (ROAD.halfWidth + 3), z, dirs[Math.floor(Math.random() * dirs.length)]);
       sign.userData.baseX = sign.position.x;
   scene.add(sign);
       S.roadSigns.push(sign);
@@ -2412,7 +2531,8 @@ function animate() {
     console.log('🔊 SFX: Gridlock warning!');
 
     S.gridlockActive = true;
-    setTimeout(() => {
+    S.gridlockTimeoutId = setTimeout(() => {
+      S.gridlockTimeoutId = null;
       if (S.started && !S.over) {
         spawnGridlockWall();
         S.gridlockWarning = false;
@@ -2429,7 +2549,7 @@ function animate() {
   }
 
   // ── Metro pillars scroll ──
-  const showMetro = S.distanceTraveled > 3800;
+  const showMetro = S.distanceTraveled > 4400;
   S.metroPillars.forEach(p => {
     p.visible = showMetro;
     p.position.z += S.speed;
@@ -2444,7 +2564,7 @@ function animate() {
 
   // ── Buildings & palms parallax ──
   S.buildings.forEach(b => {
-    b.position.z += S.speed * 0.45;
+    b.position.z += S.speed * 0.7;
     if (b.position.z > 22) b.position.z -= 260;
     
     // Toggle neon lights in Ernakulam Corridor (Zone 5)
@@ -2453,7 +2573,7 @@ function animate() {
     }
   });
   S.palms.forEach(p => {
-    p.position.z += S.speed * 0.6;
+    p.position.z += S.speed;
     if (p.position.z > 22) p.position.z -= 260;
     // Subtle wind sway
     p.children.forEach((c, idx) => {
@@ -2535,47 +2655,49 @@ function animate() {
     });
   }
 
-  // ── ARCADE CURVATURE SHIFT ──
-  // Do not curve inside toll plazas or junctions where exact straight driving is required
+  // ── ARCADE CURVATURE SHIFT (Smooth Transition) ──
   const inTollPlaza = S.activeTollBooth !== null;
   const inJunction = S.activeTrafficLight !== null && S.activeTrafficLight.mesh.position.z > -100 && S.activeTrafficLight.mesh.position.z < 20;
-  
-  if (!inTollPlaza && !inJunction) {
-    const curvePhase = S.distanceTraveled * 0.0015;
-    const amplitude = 4.5;
-    const freq = 0.01;
-    
-    const applyCurve = (obj) => {
-      if (obj && obj.userData && obj.userData.baseX !== undefined) {
-        obj.position.x = obj.userData.baseX + Math.sin(curvePhase - obj.position.z * freq) * amplitude;
-        
-        // Fix "broken steps" by yawing long segment meshes (like curbs, dashes, road planes)
-        if (obj.userData.isLongSegment) {
-          const dx_dz = -amplitude * freq * Math.cos(curvePhase - obj.position.z * freq);
-          const yaw = Math.atan(dx_dz);
-          
-          if (obj.geometry && obj.geometry.type === 'PlaneGeometry') {
-            obj.rotation.z = yaw;
-          } else {
-            obj.rotation.y = yaw;
-          }
+  S.curveAmplitudeTarget = (inTollPlaza || inJunction) ? 0 : 2.0;
+  S.curveAmplitudeCurrent += (S.curveAmplitudeTarget - S.curveAmplitudeCurrent) * 0.02;
+
+  const curvePhase = S.distanceTraveled * 0.0015;
+  const curveAmp = S.curveAmplitudeCurrent;
+  const freq = 0.01;
+
+  const applyCurve = (obj) => {
+    if (obj?.userData?.baseX !== undefined) {
+      let curvedX = obj.userData.baseX + Math.sin(curvePhase - obj.position.z * freq) * curveAmp;
+      // Clamp oncoming vehicles to stay on their side of the median
+      if (obj.userData?.isOncoming) {
+        curvedX = Math.max(curvedX, ROAD.medianX + ROAD.medianWidth);
+      }
+      obj.position.x = curvedX;
+
+      if (obj.userData.isLongSegment && curveAmp > 0.1) {
+        const dx_dz = -curveAmp * freq * Math.cos(curvePhase - obj.position.z * freq);
+        const yaw = Math.atan(dx_dz);
+        if (obj.geometry?.type === 'PlaneGeometry') {
+          obj.rotation.z = yaw;
+        } else {
+          obj.rotation.y = yaw;
         }
       }
-    };
-    S.obstacles.forEach(applyCurve);
-    S.oncomingVehicles.forEach(applyCurve);
-    S.coins.forEach(applyCurve);
-    S.potholes.forEach(applyCurve);
-    S.roadSigns.forEach(applyCurve);
-    S.pickupZones.forEach(applyCurve);
-    S.dropoffZones.forEach(applyCurve);
-    S.metroPillars.forEach(applyCurve);
-    S.roadMarkings.forEach(applyCurve);
-    S.buildings.forEach(applyCurve);
-    S.palms.forEach(applyCurve);
-    S.activeJunctionAssets.forEach(applyCurve);
-    streetLights.forEach(applyCurve);
-  }
+    }
+  };
+  S.obstacles.forEach(applyCurve);
+  S.oncomingVehicles.forEach(applyCurve);
+  S.coins.forEach(applyCurve);
+  S.potholes.forEach(applyCurve);
+  S.roadSigns.forEach(applyCurve);
+  S.pickupZones.forEach(applyCurve);
+  S.dropoffZones.forEach(applyCurve);
+  S.metroPillars.forEach(applyCurve);
+  S.roadMarkings.forEach(applyCurve);
+  S.buildings.forEach(applyCurve);
+  S.palms.forEach(applyCurve);
+  S.activeJunctionAssets.forEach(applyCurve);
+  streetLights.forEach(applyCurve);
 
   // ── Minimap ──
   const minimap = document.getElementById('minimap');
