@@ -1,84 +1,46 @@
-# Savari Giri Giri!
+# Savari Giri Giri
 
-A high-octane Kerala auto-rickshaw arcade experience across NH 544 (Thrissur ⇄ Ernakulam).
+A Kerala-style auto-rickshaw arcade game set along NH 544 between **Thrissur** and **Ernakulam**. Drive the classic Auto Rickshaw through real Kerala towns, pick up and drop off passengers, obey traffic rules, and make your way down the highway.
 
-## 🚀 The Game
+## Features
 
-Jump into the driver's seat of a souped-up autorickshaw! Race through busy streets, dodge traffic, navigate pedestrians, and master the art of the 'Blink Drive' to weave through impossible gaps.
+- **Two Routes** - Drive from Thrissur to Ernakulam (Southbound) or Ernakulam to Thrissur (Northbound). Route selection is available on the start screen.
+- **Passenger System** - Pickup customers from the roadside and drop them off at their destination to earn fares. The in-game fare meter and ride card track your trip.
+- **Real NH 544 Route** - Zones based on actual towns along the route including Thrissur, Ollur, Chalakudy, Angamaly, Aluva, Kalamassery, Edappally, and Ernakulam.
+- **Traffic & Rules** - Navigate traffic lights, junctions with cross-traffic, toll booths (Paliyekkara style), and watch out for oncoming vehicles.
+- **Day/Night Cycle** - Time progresses as you drive along the route.
+- **Boost & Physics** - Speed up with Pazham Pori Boost, handle curves, and deal with realistic road conditions.
+- **Scoring** - Earn distance and bonus points. Fares add to your trip earnings tracked in the HUD.
+- **Roast AI** - On a new high score, Auto Chettan roasts you via the Gemini-powered API at `/api/roast`.
 
-## 🎯 The Vibe
+## Tech Stack
 
-**"Bullet Time meets Kerala Chaos."**
-We're blending the hyper-stylized action of *Hotline Miami* with the scenic, sun-drenched chaos of Kochi's streets. It’s fast, it’s frenetic, and it’s unapologetically Indian.
+- **Rendering**: [Three.js](https://threejs.org/) (loaded via CDN)
+- **Frontend**: Vanilla HTML, CSS, JavaScript
+- **API**: Vercel Serverless Function at `api/roast.js` (Google Gemini)
 
-## 🌟 Key Features
+## Running Locally
 
--   **The Blink Drive** - Trigger a slow-motion dash to slide through traffic and pedestrians. Miss a window, and you're toast!
--   **Dynamic AI** -
-    -   **Pedestrians** - Jauntily crossing roads, sitting on dividers, and yelling at you to watch out.
-    -   **Auto-Drivers** - Your sworn rivals. They'll cut you off, block you, and honk aggressively.
-    -   **Police Cruisers** - Hot on your tail. Don't let them crash into you!
-    -   **Scavenger Drones** - Soaring above, adding aerial chaos.
--   **Procedural City** - A sprawling, randomly generated Kochi map with:
-    -   **Toll Booths** - Race through cash lanes for a speed boost.
-    -   **Traffic Signals** - Red means stop! Green means GO!
-    -   **Street Food Stalls** - Smell the spices as you drift past.
--   **Cinematic Destruction** - Cars explode, obstacles shatter, and debris flies in glorious slow-motion.
--   **Authentic Soundtrack** - A pulsing, synth-heavy score that captures the energy of the streets.
-
-## 🛠️ Tech Stack
-
--   **Framework:** [Next.js](https://nextjs.org/)
--   **3D Engine:** [Three.js](https://threejs.org/)
--   **3D Assets:** **Gemini 3D** (via `three/models`)
--   **Styling:** [Tailwind CSS](https://tailwindcss.com/)
-
-## 🏁 Getting Started
-
-### Prerequisites
-
--   Node.js (v18 or later)
--   OpenAI API Key (for the Roasting Bot)
-
-### Installation
-
-1.  Clone the repository.
-2.  Run the setup script:
-    ```bash
-    ./setup.sh
-    ```
-    *This will install dependencies and set up the `.env` file.*
-
-### Running the Game
-
-Start the development server:
+This is a static site. You can run it with any local server:
 
 ```bash
-npm run dev
+python3 -m http.server 8000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open [http://localhost:8000](http://localhost:8000) in your browser.
 
-### How to Play
+## How to Play
 
--   **W/A/S/D** or **Arrow Keys**: Drive the Auto
--   **Space**: Brake
--   **Left Click**: Activate **Blink Drive** (Slow-mo)
+- **W / ↑** - Accelerate
+- **S / ↓** - Brake/Reverse
+- **A / ← / D / →** - Steer
+- **Space** - Pazham Pori Boost (when ready)
+- **H** - Horn
+- **Enter** - Start game / Retry on game over
+- **T** - Skip time of day
 
-### AI Configuration
+## Notes
 
-Ensure your `.env` file contains:
-
-```env
-OPENROAST_API_KEY=your_key_here
-```
-
-## 🎮 The Story
-
-You are **Savi** (short for Savari), Kochi's most audacious tuk-tuk driver. Bored with the mundane life of ferrying tourists, you've converted your auto with stolen tech and street-racer modifications. Your goal: to become the legend of the Kochi streets, one burnout at a time.
-
-## 🌟 Meet the Team
-
--   **The AI Director (Gemini 3D):** Powers the procedural world generation, ensuring every drive is unique.
--   **The Roaster (OpenAI):** Provides real-time, hilarious commentary and roasting based on your driving skill (or lack thereof).
--   **The Developer:** [Your Name/Company]
+- Select your route (Thrissur → Ernakulam or Ernakulam → Thrissur) before starting.
+- Stop at red lights and follow junction instructions to avoid penalties.
+- Slow down at toll plazas - FASTag lane is the left lane, cash lane is blocked.
