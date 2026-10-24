@@ -11,14 +11,28 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=' + process.env.GEMINI_API_KEY;
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(500).json({ error: 'Missing GEMINI_API_KEY' });
+  }
 
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req.body),
-  });
+  try {
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=' + process.env.GEMINI_API_KEY;
 
-  const data = await resp.json();
-  res.status(200).json(data);
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body),
+    });
+
+    const text = await resp.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { error: 'Invalid response from Gemini' };
+    }
+    res.status(resp.status).json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to reach Gemini' });
+  }
 }
